@@ -30,6 +30,8 @@ import {
   Globe,
   Loader2,
   RefreshCcw,
+  RotateCw,
+  ScrollText,
   Search,
 } from "lucide-react";
 import {
@@ -41,9 +43,11 @@ import {
   type MailComponentHealth,
   type MailComponentStatus,
 } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 import { SectionCard } from "./_shared/section-card";
 import { Skeleton } from "./_shared/skeleton";
 import { StatusPill, type PillTone } from "./_shared/status-pill";
+import { LogsDrawer } from "./_shared/logs-drawer";
 
 const HEALTH_POLL_MS = 10_000;
 
@@ -164,7 +168,12 @@ export function HealthTab({ serverId }: { serverId: string }) {
         ) : components ? (
           <div className="divide-y divide-border/40">
             {components.map((c) => (
-              <DaemonRow key={c.key} component={c} />
+              <DaemonRow
+                key={c.key}
+                component={c}
+                serverId={serverId}
+                onActed={tickComponents}
+              />
             ))}
           </div>
         ) : null}
@@ -225,40 +234,118 @@ export function HealthTab({ serverId }: { serverId: string }) {
 
 // ─── Rows ────────────────────────────────────────────────────────────────────
 
-function DaemonRow({ component }: { component: MailComponentHealth }) {
+/**
+ * Daemon row — purely observational. Live status pill on every row; an
+ * inline "Fix" + "Logs" pair appears only when the component is actually
+ * broken (failed / inactive / missing). Routine controls (start, stop,
+ * restart of a healthy daemon) live in Advanced > Components — Health
+ * stays a clean "is everything green?" surface.
+ */
+function DaemonRow({
+  component,
+  serverId,
+  onActed,
+}: {
+  component: MailComponentHealth;
+  serverId: string;
+  onActed: () => void;
+}) {
   const presentation = daemonStatusPresentation(component.status);
+  const { showToast } = useToast();
+  const [fixing, setFixing] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+
+  const isBroken =
+    component.status === "failed" || component.status === "inactive";
+
+  const fix = async () => {
+    if (fixing) return;
+    setFixing(true);
+    try {
+      await mailAdminApi.components.action(serverId, component.key, "restart");
+      showToast(`${component.label} restarted`, "success");
+      await onActed();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : `Restart failed`,
+        "error",
+        `${component.label} restart failed`,
+      );
+    } finally {
+      setFixing(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-4 px-5 py-4">
-      <div
-        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${presentation.iconBg}`}
-      >
-        <presentation.Icon
-          className={`size-5 ${presentation.iconColor}`}
-          strokeWidth={2}
-        />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-medium text-foreground truncate">
-            {component.label}
-          </p>
-          <span className="font-mono text-[11px] text-muted-foreground/80 truncate">
-            {component.unit}
-          </span>
+    <>
+      <div className="flex items-center gap-4 px-5 py-4">
+        <div
+          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${presentation.iconBg}`}
+        >
+          <presentation.Icon
+            className={`size-5 ${presentation.iconColor}`}
+            strokeWidth={2}
+          />
         </div>
-        <p className="text-xs text-muted-foreground mt-0.5 truncate">
-          {component.description}
-        </p>
-        {component.activeSince && component.status === "active" && (
-          <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-            Up {timeAgo(new Date(component.activeSince).getTime())}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-foreground truncate">
+              {component.label}
+            </p>
+            <span className="font-mono text-[11px] text-muted-foreground/80 truncate">
+              {component.unit}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+            {component.description}
           </p>
+          {component.activeSince && component.status === "active" && (
+            <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+              Up {timeAgo(new Date(component.activeSince).getTime())}
+            </p>
+          )}
+        </div>
+        <StatusPill tone={presentation.tone} icon={presentation.PillIcon}>
+          {presentation.label}
+        </StatusPill>
+        {isBroken && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setLogsOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+              title="Open logs"
+            >
+              <ScrollText className="size-3.5" strokeWidth={2.25} />
+              Logs
+            </button>
+            <button
+              type="button"
+              onClick={fix}
+              disabled={fixing}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium rounded-md bg-foreground text-background hover:bg-foreground/90 transition-colors disabled:opacity-60"
+              title="Restart this daemon"
+            >
+              {fixing ? (
+                <Loader2 className="size-3.5 animate-spin" strokeWidth={2.25} />
+              ) : (
+                <RotateCw className="size-3.5" strokeWidth={2.25} />
+              )}
+              {fixing ? "Fixing…" : "Fix"}
+            </button>
+          </div>
         )}
       </div>
-      <StatusPill tone={presentation.tone} icon={presentation.PillIcon}>
-        {presentation.label}
-      </StatusPill>
-    </div>
+      {logsOpen && (
+        <LogsDrawer
+          serverId={serverId}
+          componentKey={component.key}
+          unit={component.unit}
+          label={component.label}
+          onClose={() => setLogsOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -505,14 +592,26 @@ function summarizeHealth(
 ): BannerSummary | null {
   if (!components && !checks) return null;
 
-  const daemonsDown =
+  // Separate "missing" from "down" — a unit that isn't installed on this
+  // host is a different operator problem than one that exists and is
+  // failing. The banner names which is which so the user doesn't have
+  // to scan the whole list to figure out what's broken.
+  const downComponents =
     components?.filter(
-      (c) => c.status === "failed" || c.status === "inactive" || c.status === "missing",
-    ).length ?? 0;
+      (c) => c.status === "failed" || c.status === "inactive",
+    ) ?? [];
+  const missingComponents =
+    components?.filter((c) => c.status === "missing") ?? [];
   const dnsFails = checks?.filter((c) => c.status === "fail").length ?? 0;
   const dnsWarns = checks?.filter((c) => c.status === "warn").length ?? 0;
 
-  if (daemonsDown === 0 && dnsFails === 0 && dnsWarns === 0 && (components || checks)) {
+  const allClean =
+    downComponents.length === 0 &&
+    missingComponents.length === 0 &&
+    dnsFails === 0 &&
+    dnsWarns === 0;
+
+  if (allClean && (components || checks)) {
     return {
       Icon: CheckCircle2,
       banner: "bg-emerald-500/5 border-emerald-500/30",
@@ -524,7 +623,11 @@ function summarizeHealth(
     };
   }
 
-  if (daemonsDown === 0 && dnsFails === 0) {
+  if (
+    downComponents.length === 0 &&
+    missingComponents.length === 0 &&
+    dnsFails === 0
+  ) {
     return {
       Icon: AlertTriangle,
       banner: "bg-amber-500/5 border-amber-500/30",
@@ -536,11 +639,41 @@ function summarizeHealth(
     };
   }
 
+  // If only "missing" daemons (nothing actually down, no DNS fails), it's
+  // a soft warning — the box doesn't ship that daemon. Don't paint the
+  // whole banner red for that.
+  if (
+    downComponents.length === 0 &&
+    missingComponents.length > 0 &&
+    dnsFails === 0
+  ) {
+    const names = missingComponents.map((c) => c.label).join(", ");
+    return {
+      Icon: AlertTriangle,
+      banner: "bg-amber-500/5 border-amber-500/30",
+      iconBg: "bg-amber-500/10",
+      iconColor: "text-amber-600 dark:text-amber-400",
+      textColor: "text-amber-700 dark:text-amber-300",
+      label: `${names} not installed`,
+      sub:
+        missingComponents.length === 1
+          ? "Mail still works without it; install only if you actually need this component."
+          : "Mail still works without them; install only if you actually need these components.",
+    };
+  }
+
   const parts: string[] = [];
-  if (daemonsDown > 0)
-    parts.push(`${daemonsDown} daemon${daemonsDown === 1 ? "" : "s"} not running`);
-  if (dnsFails > 0)
+  if (downComponents.length > 0) {
+    parts.push(`${downComponents.map((c) => c.label).join(", ")} down`);
+  }
+  if (missingComponents.length > 0) {
+    parts.push(
+      `${missingComponents.map((c) => c.label).join(", ")} not installed`,
+    );
+  }
+  if (dnsFails > 0) {
     parts.push(`${dnsFails} DNS record${dnsFails === 1 ? "" : "s"} missing`);
+  }
 
   return {
     Icon: CircleX,

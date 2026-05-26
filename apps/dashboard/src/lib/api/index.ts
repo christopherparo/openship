@@ -48,16 +48,22 @@ export type {
   CreateMailboxPayload,
   UpdateMailboxPayload,
   DomainDependents,
+  AdditionalDomainDnsState,
   MailServerStats,
   DnsCheck,
   DnsCheckStatus,
   DnsScanResult,
+  ComponentAction,
+  ComponentActionResult,
+  ComponentLogs,
+  BulkRestartResult,
 } from "./mail-admin";
 export type {
   MailSetupStep,
   MailStepStatus,
   MailSetupStatus,
   MailCredentials,
+  MailWebmailSummary,
   DnsRecord,
   DnsRecords,
   MailSSEEvent,
@@ -69,6 +75,7 @@ export type {
   MailComponentDef,
   MailHealthResponse,
   Branding,
+  WebmailTargetOption,
 } from "./mail";
 
 /* --- Auth helpers -------------------------------------------------- */

@@ -1,16 +1,20 @@
-import { docsSource } from "@/lib/source";
+import { docsSource, type DocFrontmatter } from "@/lib/source";
 import { DocsPage, DocsBody } from "fumadocs-ui/page";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
-const SITE_URL = "https://openship.io";
-
 type Params = Promise<{ slug?: string[] }>;
+type DPage = { url: string; data: DocFrontmatter };
 
-export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Params;
+}): Promise<Metadata> {
   const { slug } = await params;
-  const page = docsSource.getPage(slug);
-  if (!page) return {};
+  const rawPage = docsSource.getPage(slug);
+  if (!rawPage) return {};
+  const page = rawPage as unknown as DPage;
 
   const title = `${page.data.title} – Openship Docs`;
   const description = page.data.description ?? "Openship documentation";
@@ -21,7 +25,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
     openGraph: {
       title,
       description,
-      url: `${SITE_URL}${page.url}`,
+      url: page.url,
       siteName: "Openship",
       type: "article",
     },
@@ -31,21 +35,22 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
       description,
     },
     alternates: {
-      canonical: `${SITE_URL}${page.url}`,
+      canonical: page.url,
     },
   };
 }
 
 export default async function Page({ params }: { params: Params }) {
   const { slug } = await params;
-  const page = docsSource.getPage(slug);
-  if (!page) notFound();
+  const rawPage = docsSource.getPage(slug);
+  if (!rawPage) notFound();
+  const page = rawPage as unknown as DPage;
 
   const MDXContent = page.data.body;
 
   return (
     <DocsPage
-      toc={page.data.toc}
+      toc={page.data.toc as never}
       tableOfContent={{
         style: "clerk",
         single: false,
@@ -54,7 +59,9 @@ export default async function Page({ params }: { params: Params }) {
       <DocsBody>
         <h1 className="text-3xl font-bold tracking-tight">{page.data.title}</h1>
         {page.data.description && (
-          <p className="mt-2 text-lg text-fd-muted-foreground">{page.data.description}</p>
+          <p className="mt-2 text-lg text-fd-muted-foreground">
+            {page.data.description}
+          </p>
         )}
         <MDXContent />
       </DocsBody>

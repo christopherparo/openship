@@ -13,6 +13,7 @@ import { Plus, Pencil, Trash2, Globe } from "lucide-react";
 import {
   mailAdminApi,
   type AdminDomain,
+  type AdditionalDomainDnsState,
   getApiErrorMessage,
 } from "@/lib/api";
 import { useModal } from "@/context/ModalContext";
@@ -27,23 +28,62 @@ import {
   FormModalContent,
   inputClassName,
 } from "./_shared/form-modal-content";
+import { useToast } from "@/context/ToastContext";
+import type { DnsRecords } from "@/lib/api";
+import { DnsHoldBanner } from "../dns-hold-banner";
 
 interface DomainsTabProps {
   serverId: string;
   primaryDomain: string;
+  /**
+   * Invoked after a successful domain delete. The parent uses this to
+   * clear `?domain=<deleted>` from the URL so the Mailboxes tab doesn't
+   * keep fetching from a domain that no longer exists.
+   */
+  onDomainDeleted?: (domain: string) => void;
 }
 
-export function DomainsTab({ serverId, primaryDomain }: DomainsTabProps) {
+export function DomainsTab({
+  serverId,
+  primaryDomain,
+  onDomainDeleted,
+}: DomainsTabProps) {
   const { showModal, hideModal } = useModal();
+  const { showToast } = useToast();
   const [rows, setRows] = useState<AdminDomain[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDns, setPendingDns] = useState<AdditionalDomainDnsState[]>([]);
+  const [acknowledging, setAcknowledging] = useState<string | null>(null);
+
+  const acknowledgeDomain = useCallback(
+    async (domain: string) => {
+      setAcknowledging(domain);
+      try {
+        await mailAdminApi.domains.acknowledgeDns(serverId, domain);
+        await reload();
+      } catch (err) {
+        showToast(
+          getApiErrorMessage(err, "Failed to acknowledge DNS records"),
+          "error",
+        );
+      } finally {
+        setAcknowledging(null);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [serverId, showToast],
+  );
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const res = await mailAdminApi.domains.list(serverId);
-      setRows(res.domains);
+      const [domainsRes, pendingRes] = await Promise.all([
+        mailAdminApi.domains.list(serverId),
+        mailAdminApi.domains.pendingDns(serverId).catch(() => ({ pending: [] })),
+      ]);
+      setRows(domainsRes.domains);
+      setPendingDns(pendingRes.pending);
     } catch (err) {
       setError(getApiErrorMessage(err, "Failed to load domains"));
     } finally {
@@ -101,6 +141,7 @@ export function DomainsTab({ serverId, primaryDomain }: DomainsTabProps) {
           onCancel={() => hideModal(id)}
           onDeleted={() => {
             hideModal(id);
+            onDomainDeleted?.(row.domain);
             void reload();
           }}
         />
@@ -219,6 +260,30 @@ export function DomainsTab({ serverId, primaryDomain }: DomainsTabProps) {
         </div>
       )}
 
+      {pendingDns.length > 0 && (
+        <div className="space-y-4">
+          {pendingDns.map((p) => (
+            <DnsHoldBanner
+              key={p.domain}
+              records={p.records as unknown as DnsRecords}
+              domain={p.domain}
+              title={`Publish DNS records for ${p.domain}`}
+              description={
+                <>
+                  Mail can flow to <strong>{p.domain}</strong> once these are
+                  live. The MX record points back to your existing mail server;
+                  DKIM was generated automatically when the domain was added.
+                  Add them at your DNS provider, then click{" "}
+                  <strong>I've set the records — continue</strong>.
+                </>
+              }
+              acknowledging={acknowledging === p.domain}
+              onAcknowledge={() => void acknowledgeDomain(p.domain)}
+            />
+          ))}
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         rows={rows}
@@ -271,18 +336,25 @@ function CreateDomainForm({
   onCancel: () => void;
   onCreated: () => void;
 }) {
+  const { showToast } = useToast();
   const [domain, setDomain] = useState("");
   const [description, setDescription] = useState("");
   const [defaultQuotaGB, setDefaultQuotaGB] = useState("");
 
   const submit = async () => {
-    await mailAdminApi.domains.create(serverId, {
+    const res = await mailAdminApi.domains.create(serverId, {
       domain: domain.trim().toLowerCase(),
       description: description.trim() || undefined,
       defaultQuotaMB: defaultQuotaGB
         ? Math.round(Number(defaultQuotaGB) * 1024)
         : undefined,
     });
+    if (res.dnsWarning) {
+      // The domain row was created but DKIM/DNS provisioning failed —
+      // surface the reason so the operator knows why no banner will
+      // appear and what to fix.
+      showToast(res.dnsWarning, "error");
+    }
     onCreated();
   };
 
@@ -424,34 +496,65 @@ function DeleteDomainConfirm({
   onCancel: () => void;
   onDeleted: () => void;
 }) {
-  const blocked = row.mailboxes > 0 || row.aliases > 0;
+  const hasDependents = row.mailboxes > 0 || row.aliases > 0;
+  const [cascade, setCascade] = useState(false);
 
   const submit = async () => {
-    if (blocked) {
+    if (hasDependents && !cascade) {
       throw new Error(
-        `Domain still has ${row.mailboxes} mailbox(es) and ${row.aliases} alias(es). Delete those first.`,
+        `Domain still has ${row.mailboxes} mailbox(es) and ${row.aliases} alias(es). Tick "Also delete…" to remove them, or delete them manually first.`,
       );
     }
-    await mailAdminApi.domains.delete(serverId, row.domain);
+    await mailAdminApi.domains.delete(serverId, row.domain, {
+      cascade: hasDependents ? cascade : false,
+    });
     onDeleted();
   };
+
+  const partsLabel = [
+    row.mailboxes > 0 ? `${row.mailboxes} mailbox${row.mailboxes === 1 ? "" : "es"}` : null,
+    row.aliases > 0 ? `${row.aliases} alias${row.aliases === 1 ? "" : "es"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" and ");
 
   return (
     <FormModalContent
       title={`Delete ${row.domain}?`}
       description={
-        blocked
-          ? `This domain still has ${row.mailboxes} mailbox(es) and ${row.aliases} alias(es). Remove them first, then delete the domain.`
-          : "Removes the row from vmail.domain and any domain-admin mappings. Mail to this domain will start being rejected immediately."
+        hasDependents
+          ? `This domain still has ${partsLabel}. Tick the box below to delete them too — mailbox files on disk will be removed and cannot be undone.`
+          : "Removes the domain row and any admin mappings. Mail to this domain will start being rejected immediately."
       }
-      submitLabel="Delete domain"
+      submitLabel={hasDependents && cascade ? `Delete domain + ${partsLabel}` : "Delete domain"}
       submittingLabel="Deleting…"
       submitVariant="danger"
       onSubmit={submit}
       onCancel={onCancel}
-      disabled={blocked}
+      disabled={hasDependents && !cascade}
     >
-      <div />
+      {hasDependents ? (
+        <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={cascade}
+            onChange={(e) => setCascade(e.target.checked)}
+            className="mt-0.5 size-4 rounded border-rose-500/40 text-rose-600 focus:ring-rose-500/40"
+          />
+          <span className="text-sm leading-snug">
+            <span className="font-medium text-foreground">
+              Also delete {partsLabel}
+            </span>
+            <span className="block text-xs text-muted-foreground/80 mt-0.5">
+              Permanently removes every mailbox under this domain (DB rows
+              and Maildir files on disk) along with all aliases. This cannot
+              be reversed.
+            </span>
+          </span>
+        </label>
+      ) : (
+        <div />
+      )}
     </FormModalContent>
   );
 }

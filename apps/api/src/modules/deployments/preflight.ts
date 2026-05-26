@@ -167,7 +167,7 @@ async function checkPublicEndpoints(
       const endpointCloud = cloud?.runtime.ok && userId
         ? await requestCloudPreflight(snapshot, userId, { customDomain: hostname })
         : cloud;
-      const result = await checkCustomDomain(hostname, endpointCloud);
+      const result = await checkCustomDomain(hostname, endpointCloud, snapshot);
       checks.push({
         ...result,
         id: `endpoint-domain-${destinationLabel}`,
@@ -225,6 +225,7 @@ async function checkComposeServiceDomains(
   composeServices: ComposeService[],
   projectSlug: string | undefined,
   cloud: CloudPreflightData | null,
+  snapshot?: DeploymentConfigSnapshot,
 ): Promise<PreflightCheck[]> {
   const checks: PreflightCheck[] = [];
   const seen = new Set<string>();
@@ -246,7 +247,7 @@ async function checkComposeServiceDomains(
       }
       seen.add(domain);
 
-      const result = await checkCustomDomain(domain, cloud);
+      const result = await checkCustomDomain(domain, cloud, snapshot);
       checks.push({
         ...result,
         id: `service-domain-${service.name}`,
@@ -487,6 +488,7 @@ async function checkSlug(slug: string, cloud: CloudPreflightData | null): Promis
 async function checkCustomDomain(
   customDomain: string,
   cloud: CloudPreflightData | null,
+  snapshot?: DeploymentConfigSnapshot,
 ): Promise<PreflightCheck> {
   if (cloud?.runtime.ok && cloud.customDomain) {
     if (cloud.customDomain.verified) {
@@ -507,6 +509,37 @@ async function checkCustomDomain(
       status: "fail",
       message: cloud.customDomain.message ?? `DNS not configured for ${customDomain}`,
     };
+  }
+
+  // Self-hosted (deploying directly to an operator-managed server): the
+  // edge.openship.io CNAME check doesn't apply — the operator points the
+  // domain at their own server's IP. Soft-check that *something* resolves
+  // so a typo'd domain still fails preflight, but accept any record.
+  const isSelfHostedTarget =
+    snapshot?.deployTarget === "server" || snapshot?.deployTarget === "local";
+  if (isSelfHostedTarget) {
+    try {
+      const dns = await import("node:dns/promises");
+      const lookups = await Promise.allSettled([
+        dns.resolve4(customDomain),
+        dns.resolve6(customDomain),
+        dns.resolveCname(customDomain),
+      ]);
+      const resolved = lookups.some(
+        (r) => r.status === "fulfilled" && r.value.length > 0,
+      );
+      if (resolved) {
+        return { id: "domain", label: "Domain DNS", status: "pass" };
+      }
+      return {
+        id: "domain",
+        label: "Domain DNS",
+        status: "warn",
+        message: `No DNS records found yet for ${customDomain}. Point it at your server's IP; the deploy will continue but TLS issuance will fail until DNS resolves.`,
+      };
+    } catch {
+      return { id: "domain", label: "Domain DNS", status: "pass" };
+    }
   }
 
   try {
@@ -633,12 +666,12 @@ export async function runPreflightChecks(
   checks.push(await checkCloudRuntime(cloudPreflight, cloudRequirement));
 
   if (!hasEndpointRouting && opts?.customDomain) {
-    checks.push(await checkCustomDomain(opts.customDomain, cloudPreflight));
+    checks.push(await checkCustomDomain(opts.customDomain, cloudPreflight, snapshot));
   }
 
   if (opts?.composeServices?.length) {
     checks.push(
-      ...(await checkComposeServiceDomains(opts.composeServices, opts.slug, cloudPreflight)),
+      ...(await checkComposeServiceDomains(opts.composeServices, opts.slug, cloudPreflight, snapshot)),
     );
   }
 

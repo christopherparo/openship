@@ -59,17 +59,33 @@ export interface MailHealthResponse {
 }
 
 /**
- * Postmaster login + IMAP/SMTP host info. Surfaced to the dashboard so the
- * user has a single place to grab the credentials they need to log into
- * the mailbox (or wire Zero). Internal DB passwords stay server-side.
+ * Postmaster identity + IMAP/SMTP host info. The password is never sent
+ * to the client — it lives only as a hash in vmail.mailbox. Operators set
+ * a known password via the Change flow when they need one.
  */
 export interface MailCredentials {
   username: string;
-  password: string;
   smtpHost: string;
   smtpPort: number;
   imapHost: string;
   imapPort: number;
+}
+
+/**
+ * Webmail (Zero) install record. `installed=true` means a successful
+ * deploy has happened against this mail server. Absent or `installed=false`
+ * means the overview tab should show the Deploy CTA instead of an Open
+ * webmail button. The `brandingToken` is NEVER exposed here — that secret
+ * lives between the openship API and the Zero server only.
+ */
+export interface MailWebmailSummary {
+  installed: boolean;
+  targetServerId: string;
+  hostname: string;
+  url: string;
+  internalPort: number;
+  deployedAt: string;
+  version: string;
 }
 
 export interface MailSetupStatus {
@@ -93,6 +109,8 @@ export interface MailSetupStatus {
    */
   ptrAcknowledged?: boolean;
   credentials?: MailCredentials;
+  /** Webmail deploy record. Absent when no webmail is deployed yet. */
+  webmail?: MailWebmailSummary;
   steps: MailStepStatus[];
   /** Server-buffered log lines, rehydrated on page reload. */
   logs?: MailSessionLogLine[];
@@ -102,13 +120,24 @@ export interface MailSetupStatus {
   errorMessage?: string;
 }
 
+// ─── Webmail deploy types ────────────────────────────────────────────────────
+
+export interface WebmailTargetOption {
+  kind: "mail" | "server" | "opshcloud";
+  serverId: string;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
 export interface DnsRecord {
   type: string;
   name: string;
   value: string;
   /** MX priority. Other record types ignore this. */
   priority?: number;
-  /** False = client-autoconfig helper, not required for mail delivery. */
+  /** False = optional helper, not required for mail delivery. */
   required?: boolean;
 }
 
@@ -123,10 +152,6 @@ export interface DnsRecords {
   spf: DnsRecord;
   dkim: DnsRecord;
   dmarc: DnsRecord;
-  // Client autoconfig — forward-looking. Depend on server-side XML
-  // responders (Phase 7); harmless to publish now, useful when they ship.
-  autodiscoverCname?: DnsRecord;
-  autoconfigCname?: DnsRecord;
 }
 
 // ─── Port conflict types ─────────────────────────────────────────────────────
@@ -437,6 +462,31 @@ export const mailApi = {
 
   updateBranding: (serverId: string, patch: Partial<Branding>) =>
     api.patch<{ branding: Branding }>(endpoints.mail.branding(serverId), patch),
+
+  // ── Webmail deploy ────────────────────────────────────────────────────────
+  webmail: {
+    /** Hosts the webmail can be deployed to (mail server + other openship servers). */
+    listTargets: (serverId: string) =>
+      api.get<{ options: WebmailTargetOption[] }>(
+        `${endpoints.mail.webmail.targets}?serverId=${encodeURIComponent(serverId)}`,
+      ),
+
+    /**
+     * Create a project + deployment for this webmail install and kick off
+     * the deploy in the background. The dashboard then redirects to
+     * /build/[deploymentId] and subscribes to the standard SSE endpoint.
+     */
+    deployAsProject: (input: {
+      mailServerId: string;
+      targetServerId: string;
+      hostname: string;
+      internalPort?: number;
+    }) =>
+      api.post<{ deploymentId: string; projectId: string }>(
+        endpoints.mail.webmail.deployProject,
+        input,
+      ),
+  },
 };
 
 // ─── Branding ────────────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ interface OptionCardProps {
   children?: React.ReactNode;
 }
 
-const OptionCard: React.FC<OptionCardProps> = ({
+export const OptionCard: React.FC<OptionCardProps> = ({
   selected,
   onSelect,
   icon,

@@ -19,7 +19,7 @@
  *   - Advanced:   destructive / power-user actions.
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
@@ -40,6 +40,10 @@ import { DnsTab } from "./dns-tab";
 import { HealthTab } from "./health-tab";
 import { BrandingTab } from "./branding-tab";
 import { AdvancedTab } from "./advanced-tab";
+import { WelcomeModal } from "./welcome-modal";
+import { ReputationBanner } from "./reputation-banner";
+
+const WELCOME_SEEN_PREFIX = "openship:mail:welcome-seen:";
 
 interface MailAdminPanelProps {
   status: MailSetupStatus;
@@ -78,6 +82,24 @@ export function MailAdminPanel({ status, serverId, onRefresh }: MailAdminPanelPr
   const router = useRouter();
   const searchParams = useSearchParams();
   const primaryDomain = status.domain ?? "";
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  // One-shot welcome modal: first time the admin panel mounts for this
+  // serverId, show the celebratory test-email modal. The flag is keyed by
+  // serverId so each new mail server gets its own welcome moment.
+  useEffect(() => {
+    if (!serverId || typeof window === "undefined") return;
+    const key = `${WELCOME_SEEN_PREFIX}${serverId}`;
+    if (window.localStorage.getItem(key)) return;
+    setShowWelcome(true);
+  }, [serverId]);
+
+  const dismissWelcome = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(`${WELCOME_SEEN_PREFIX}${serverId}`, "1");
+    }
+    setShowWelcome(false);
+  }, [serverId]);
 
   const tab = useMemo<TabKey>(() => {
     const raw = searchParams.get("tab") as TabKey | null;
@@ -102,6 +124,10 @@ export function MailAdminPanel({ status, serverId, onRefresh }: MailAdminPanelPr
 
   return (
     <div className="space-y-6">
+      {primaryDomain && (
+        <ReputationBanner serverId={serverId} domain={primaryDomain} />
+      )}
+
       <TabBar
         tabs={TABS}
         active={tab}
@@ -113,7 +139,18 @@ export function MailAdminPanel({ status, serverId, onRefresh }: MailAdminPanelPr
           <OverviewTab status={status} serverId={serverId} onRefresh={onRefresh} />
         )}
         {tab === "domains" && (
-          <DomainsTab serverId={serverId} primaryDomain={primaryDomain} />
+          <DomainsTab
+            serverId={serverId}
+            primaryDomain={primaryDomain}
+            onDomainDeleted={(deleted) => {
+              // If the URL's `?domain=` matched the just-deleted domain,
+              // strip it so subsequent navigation to the Mailboxes tab
+              // doesn't try to fetch from a domain that's gone.
+              if (searchParams.get("domain") === deleted) {
+                setQuery({ domain: null });
+              }
+            }}
+          />
         )}
         {tab === "mailboxes" && (
           <MailboxesTab
@@ -134,6 +171,14 @@ export function MailAdminPanel({ status, serverId, onRefresh }: MailAdminPanelPr
           />
         )}
       </div>
+
+      {showWelcome && primaryDomain && (
+        <WelcomeModal
+          serverId={serverId}
+          domain={primaryDomain}
+          onClose={dismissWelcome}
+        />
+      )}
     </div>
   );
 }

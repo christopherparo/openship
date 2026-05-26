@@ -186,6 +186,12 @@ export const endpoints = {
         `mail/admin/${encodeURIComponent(serverId)}/domains/${encodeURIComponent(domain)}`,
       domainDependents: (serverId: string, domain: string) =>
         `mail/admin/${encodeURIComponent(serverId)}/domains/${encodeURIComponent(domain)}/dependents`,
+      domainDns: (serverId: string, domain: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/domains/${encodeURIComponent(domain)}/dns`,
+      domainDnsAcknowledge: (serverId: string, domain: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/domains/${encodeURIComponent(domain)}/dns/acknowledge`,
+      pendingDomainDns: (serverId: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/domains-dns/pending`,
       mailboxes: (serverId: string) =>
         `mail/admin/${encodeURIComponent(serverId)}/mailboxes`,
       mailbox: (serverId: string, email: string) =>
@@ -194,9 +200,21 @@ export const endpoints = {
         `mail/admin/${encodeURIComponent(serverId)}/stats`,
       dnsScan: (serverId: string) =>
         `mail/admin/${encodeURIComponent(serverId)}/dns-scan`,
+      testEmail: (serverId: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/test-email`,
+      componentAction: (serverId: string, key: string, action: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/components/${encodeURIComponent(key)}/${encodeURIComponent(action)}`,
+      componentLogs: (serverId: string, key: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/components/${encodeURIComponent(key)}/logs`,
+      componentsRestartAll: (serverId: string) =>
+        `mail/admin/${encodeURIComponent(serverId)}/components/restart-all`,
     },
     branding: (serverId: string) =>
       `mail/branding/${encodeURIComponent(serverId)}`,
+    webmail: {
+      targets: "mail/webmail/targets",
+      deployProject: "mail/webmail/deploy-project",
+    },
   },
 
   /* ---------------------------------------------------------------- */

@@ -287,17 +287,13 @@ export async function softDeleteMailbox(
       `UPDATE mailbox SET active = 0, modified = NOW() WHERE username = ${q(username)}`,
       `UPDATE forwardings SET active = 0 WHERE address = ${q(username)} AND forwarding = ${q(username)}`,
       `INSERT INTO deleted_mailboxes (
-          username, domain, maildir,
-          storagenode, storagebasedirectory,
-          admin, delete_date
+          username, domain, maildir, admin, delete_date
         ) VALUES (
           ${q(username)},
           ${q(existing.domain)},
           ${q(existing.maildir)},
-          ${q(existing.storagenode)},
-          ${q(existing.storagebasedirectory)},
           ${q(adminUsername)},
-          NOW()
+          CURRENT_DATE
         )`,
     ]);
     await recountDomain(serverId, existing.domain);

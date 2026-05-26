@@ -72,6 +72,17 @@ export function MailboxesTab({
       .then((res) => {
         if (cancelled) return;
         setDomains(res.domains);
+        // If the URL points at a domain that no longer exists (e.g. it
+        // was just deleted from the Domains tab), bounce back to the
+        // primary domain so the mailbox fetch below doesn't 4xx in a
+        // loop.
+        if (
+          selectedDomain &&
+          selectedDomain !== primaryDomain &&
+          !res.domains.some((d) => d.domain === selectedDomain)
+        ) {
+          onSelectDomain(primaryDomain);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -83,7 +94,7 @@ export function MailboxesTab({
     return () => {
       cancelled = true;
     };
-  }, [serverId]);
+  }, [serverId, selectedDomain, primaryDomain, onSelectDomain]);
 
   const reloadMailboxes = useCallback(async () => {
     if (!activeDomain) return;
@@ -408,7 +419,7 @@ function CreateMailboxForm({
             type={showPassword ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className={`${inputClassName} font-mono`}
+            className={inputClassName}
           />
           <button
             type="button"
@@ -463,9 +474,9 @@ function PasswordPreview({
   };
   return (
     <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/40 border border-border/50">
-      <code className="font-mono text-xs text-foreground flex-1 truncate">
+      <span className="text-[13px] text-foreground flex-1 truncate">
         {visible ? value : "•".repeat(Math.min(value.length, 24))}
-      </code>
+      </span>
       <button
         type="button"
         onClick={onToggle}
@@ -545,7 +556,7 @@ function EditMailboxForm({
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="••••••••"
-          className={`${inputClassName} font-mono`}
+          className={inputClassName}
         />
       </Field>
       <Field label="Quota (GB)" hint="0 or blank = unlimited.">

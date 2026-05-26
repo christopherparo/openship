@@ -337,7 +337,7 @@ export class SshExecutor implements CommandExecutor {
     localPath: string,
     remotePath: string,
     onLog?: (log: LogEntry) => void,
-    options?: { excludes?: string[]; includes?: string[] },
+    options?: { excludes?: string[]; includes?: string[]; mode?: "auto" | "tar" },
   ): Promise<void> {
     const deps = {
       config: this.config,
@@ -349,6 +349,12 @@ export class SshExecutor implements CommandExecutor {
         logCb?: (log: LogEntry) => void,
       ) => this.pipeLocal(localCmd, remoteCmd, logCb),
     };
+
+    if (options?.mode === "tar") {
+      onLog?.(logEntry("Streaming source as a tar pipe over the existing SSH connection..."));
+      await transferRemoteDirectoryWithTar(localPath, remotePath, deps, onLog, options);
+      return;
+    }
 
     const rsync = await canUseRemoteRsync(deps);
     if (rsync.ok) {

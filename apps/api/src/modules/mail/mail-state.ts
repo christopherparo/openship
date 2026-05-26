@@ -29,12 +29,96 @@ export const STATE_FILE_PATH = "/root/.openship-mail-state.json";
 
 const STATE_VERSION = 1;
 
+/**
+ * Webmail (Zero) deployment record. Set after a successful deploy through
+ * /mail/webmail/deploy. Absence = "not deployed" — the overview UI uses
+ * this to decide between the Deploy CTA and the Open-webmail CTA.
+ *
+ * Webmail can live on the mail VPS (most common, `targetServerId` equal
+ * to the mail server's serverId) OR on a different openship-managed
+ * server. The `url` is whatever clients should open in a browser.
+ *
+ * `brandingToken` is the shared secret openship's API uses to PATCH the
+ * Zero `/admin/branding` endpoint. Never sent to the dashboard — only
+ * the API reads it.
+ */
+export interface MailWebmailState {
+  /** True once deploy succeeded end-to-end and health check passed. */
+  installed: boolean;
+  /** openship serverId hosting the Zero process. */
+  targetServerId: string;
+  /** Public hostname the operator typed into the deploy modal. */
+  hostname: string;
+  /** Browser URL, e.g. https://mail.oblien.com/. */
+  url: string;
+  /** Internal port the Zero server binds to on the target host. */
+  internalPort: number;
+  /** Shared admin secret for openship → Zero PATCH /admin/branding. */
+  brandingToken: string;
+  /**
+   * Hex-encoded session-cookie encryption key. Generated once at first
+   * deploy and reused across redeploys so existing sessions survive — a
+   * fresh key here logs every operator out.
+   */
+  sessionEncryptionKey: string;
+  /** ISO timestamp of the last successful deploy. */
+  deployedAt: string;
+  /** Source revision deployed — git SHA when we read from a release, or "local" during dev copies. */
+  version: string;
+}
+
 export interface MailStepResult {
   stepId: number;
   success: boolean;
   message: string;
   warning?: string;
   data?: Record<string, unknown>;
+}
+
+/**
+ * One DNS record. Matches the shape `stepDkimKeys` emits and what
+ * `DnsRecordsView` on the dashboard renders. Kept in the state module
+ * so admin/domain-dns.service can import it without crossing module
+ * boundaries.
+ */
+export interface PersistedDnsRecord {
+  type: string;
+  name: string;
+  value: string;
+  /** MX priority. Ignored for non-MX records. */
+  priority?: number;
+  /** False = optional helper, not required for mail delivery. */
+  required?: boolean;
+}
+
+/**
+ * Set of records published per domain. The primary install records use
+ * a superset of this (plus A/AAAA host records on the mail subdomain).
+ * Additional domains added through the admin panel only need MX/SPF/DMARC
+ * — DKIM stays optional because we don't auto-provision a keypair for
+ * every new domain; iRedMail's `amavisd genrsa` is a manual operator
+ * action when the operator wants signed mail from that domain.
+ */
+export interface DnsRecordSet {
+  mx: PersistedDnsRecord;
+  spf: PersistedDnsRecord;
+  dkim?: PersistedDnsRecord;
+  dmarc: PersistedDnsRecord;
+}
+
+/**
+ * DNS provisioning record for an additional domain (one added through
+ * the admin panel after the primary install). The dashboard's Domains
+ * tab uses `acknowledgedAt === null` to keep showing the
+ * "publish DNS records" banner until the operator clicks
+ * "I've set the records — continue".
+ */
+export interface AdditionalDomainDns {
+  records: DnsRecordSet;
+  /** ISO timestamp the operator acked the records. null = still pending. */
+  acknowledgedAt: string | null;
+  /** ISO timestamp the domain was added through the admin panel. */
+  createdAt: string;
 }
 
 /** Single line of streamed output. Shape mirrors what the SSE event carries. */
@@ -90,6 +174,21 @@ export interface MailServerState {
    * — older lines fall off the front.
    */
   logs?: MailSessionLogLine[];
+  /**
+   * Optional webmail (Zero) deployment record. Absent = not deployed.
+   * Lives next to the iRedMail install state because openship treats
+   * webmail as a feature of the mail server, not a standalone project.
+   */
+  webmail?: MailWebmailState;
+  /**
+   * Per-domain DNS provisioning state for additional domains added via
+   * the admin panel (after the primary install). The primary install
+   * domain's records live in `dnsRecords` above; this map carries the
+   * record set + ack timestamp for every additional domain so the
+   * Domains tab can render a "publish records" banner until the
+   * operator confirms.
+   */
+  additionalDomains?: Record<string, AdditionalDomainDns>;
 }
 
 // ─── I/O ─────────────────────────────────────────────────────────────────────

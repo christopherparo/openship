@@ -2,11 +2,41 @@
  * Health check module — used by load balancers and Docker health checks.
  */
 import { Hono } from "hono";
-import { hostname } from "node:os";
+import { hostname, userInfo } from "node:os";
 import { cloudRuntimeTarget, env } from "../../config/env";
 
-/** Computed once — hostname never changes at runtime. */
-const machineName = env.DEPLOY_MODE === "desktop" ? hostname() : undefined;
+/**
+ * Best-effort friendly name for the local machine. On macOS with Bonjour
+ * misconfigured, `os.hostname()` can return the LAN IP literal (e.g.
+ * "192.168.1.8") instead of a name — useless in the sidebar. Treat any
+ * IPv4/IPv6 literal as bogus and fall back to the unix username, which
+ * the OS always has and renders nicely as a personal-machine identity.
+ */
+function resolveMachineName(): string | undefined {
+  if (env.DEPLOY_MODE !== "desktop") return undefined;
+
+  const raw = (() => {
+    try {
+      return hostname();
+    } catch {
+      return "";
+    }
+  })().trim();
+
+  const isIpv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(raw);
+  const isIpv6 = raw.includes(":") && /^[0-9a-fA-F:]+$/.test(raw);
+  if (raw && !isIpv4 && !isIpv6) return raw;
+
+  try {
+    const u = userInfo().username?.trim();
+    if (u) return `${u[0].toUpperCase()}${u.slice(1)}`;
+  } catch {
+    /* fall through */
+  }
+  return undefined;
+}
+
+const machineName = resolveMachineName();
 
 export const healthRoutes = new Hono();
 

@@ -1,8 +1,25 @@
+import type { Metadata } from "next";
 import { Navbar, Footer } from "@/components/landing";
 
-export const metadata = {
-  title: "Terms · Openship",
-  description: "Terms of service for Openship.",
+const PAGE_TITLE = "Terms of Service";
+const PAGE_DESCRIPTION =
+  "Terms governing Openship Cloud and Openship Business. The self-hosted platform itself is governed by AGPL-3.0. Plain language, no surprises.";
+
+export const metadata: Metadata = {
+  title: PAGE_TITLE,
+  description: PAGE_DESCRIPTION,
+  alternates: { canonical: "/terms" },
+  openGraph: {
+    title: `${PAGE_TITLE} — Openship`,
+    description: PAGE_DESCRIPTION,
+    url: "/terms",
+    type: "article",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${PAGE_TITLE} — Openship`,
+    description: PAGE_DESCRIPTION,
+  },
 };
 
 const SECTIONS = [

@@ -67,7 +67,12 @@ export const stackCategories: { id: StackCategory; label: string }[] = [
 const EXCLUDED_STACKS = new Set<string>(["unknown", "docker", "docker-compose"]);
 
 export const frameworks: FrameworkConfig[] = (Object.entries(STACKS) as [StackId, (typeof STACKS)[StackId]][])
-  .filter(([id, def]) => !EXCLUDED_STACKS.has(id) && def.category !== "docker" && def.category !== "services")
+  .filter(
+    ([id, def]) =>
+      !EXCLUDED_STACKS.has(id) &&
+      def.category !== "docker" &&
+      def.category !== "services",
+  )
   .map(([id, def]) => ({
     id,
     name: def.name,

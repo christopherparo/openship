@@ -3,6 +3,7 @@
  */
 
 import type { Context } from "hono";
+import { AppError } from "@repo/core";
 import { streamSSE } from "../../lib/sse";
 import { getUserId, param } from "../../lib/controller-helpers";
 import * as deploymentService from "./deployment.service";
@@ -275,7 +276,13 @@ export async function buildStatus(c: Context) {
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Build session not found";
-    return c.json({ success: false, error: message }, 404);
+    // Genuine "not found" → 404. Anything else is an internal failure and
+    // should surface as 500 so it doesn't get swallowed as a UI "not found".
+    const status = err instanceof AppError && err.statusCode === 404 ? 404 : 500;
+    if (status === 500) {
+      console.error(`[BUILD_STATUS] ${id}:`, err);
+    }
+    return c.json({ success: false, error: message }, status);
   }
 }
 

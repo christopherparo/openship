@@ -9,6 +9,7 @@ import { authMiddleware, localOnly } from "../../middleware";
 import * as mail from "./mail.controller";
 import * as admin from "./admin/admin.controller";
 import * as branding from "./branding.controller";
+import * as webmail from "./webmail/webmail.controller";
 
 export const mailRoutes = new Hono();
 
@@ -38,6 +39,18 @@ mailRoutes.get(
   "/admin/:serverId/domains/:domain/dependents",
   admin.domainDependentsHandler,
 );
+mailRoutes.get(
+  "/admin/:serverId/domains/:domain/dns",
+  admin.getDomainDnsHandler,
+);
+mailRoutes.post(
+  "/admin/:serverId/domains/:domain/dns/acknowledge",
+  admin.acknowledgeDomainDnsHandler,
+);
+mailRoutes.get(
+  "/admin/:serverId/domains-dns/pending",
+  admin.pendingDomainDnsHandler,
+);
 
 /* ── Admin panel — mailboxes ──────────────────────────────────────── */
 mailRoutes.get("/admin/:serverId/mailboxes", admin.listMailboxesHandler);
@@ -52,6 +65,27 @@ mailRoutes.get("/admin/:serverId/stats", admin.getStatsHandler);
 /* ── Admin panel — DNS scan ───────────────────────────────────────── */
 mailRoutes.get("/admin/:serverId/dns-scan", admin.getDnsScanHandler);
 
+/* ── Admin panel — welcome test email ─────────────────────────────── */
+mailRoutes.post("/admin/:serverId/test-email", admin.sendTestEmailHandler);
+
+/* ── Admin panel — component actions (Health / Advanced) ──────────── */
+mailRoutes.post(
+  "/admin/:serverId/components/restart-all",
+  admin.restartAllComponentsHandler,
+);
+mailRoutes.post(
+  "/admin/:serverId/components/:key/:action",
+  admin.runComponentActionHandler,
+);
+mailRoutes.get(
+  "/admin/:serverId/components/:key/logs",
+  admin.getComponentLogsHandler,
+);
+
 /* ── Branding (white-label) — proxied to Zero webmail server ──────── */
 mailRoutes.get("/branding/:serverId", branding.getBrandingHandler);
 mailRoutes.patch("/branding/:serverId", branding.updateBrandingHandler);
+
+/* ── Webmail deploy (creates a standard project + deployment) ─────── */
+mailRoutes.get("/webmail/targets", webmail.getTargetsHandler);
+mailRoutes.post("/webmail/deploy-project", webmail.startDeployAsProjectHandler);

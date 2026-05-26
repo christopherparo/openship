@@ -9,6 +9,7 @@
 
 import { api } from "./client";
 import { endpoints } from "./endpoints";
+import type { DnsRecords, DnsRecord } from "./mail";
 
 // ─── Domains ─────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,27 @@ export interface UpdateDomainPayload {
 export interface DomainDependents {
   mailboxes: number;
   aliases: number;
+}
+
+/**
+ * DNS provisioning state for an additional domain (one added via the
+ * Domains tab after the primary install). The dashboard renders a
+ * "publish these records" banner above the table for every domain
+ * where `acknowledgedAt == null`.
+ *
+ * Records are MX/SPF/DKIM/DMARC. Host records (A/AAAA) belong to the
+ * mail subdomain on the primary install, not to additional domains.
+ */
+export interface AdditionalDomainDnsState {
+  domain: string;
+  records: {
+    mx: DnsRecord;
+    spf: DnsRecord;
+    dkim: DnsRecord;
+    dmarc: DnsRecord;
+  };
+  acknowledgedAt: string | null;
+  createdAt: string;
 }
 
 // ─── Mailboxes ───────────────────────────────────────────────────────────────
@@ -128,7 +150,7 @@ export const mailAdminApi = {
     get: (serverId: string, domain: string) =>
       api.get<{ domain: AdminDomain }>(endpoints.mail.admin.domain(serverId, domain)),
     create: (serverId: string, payload: CreateDomainPayload) =>
-      api.post<{ domain: AdminDomain }>(
+      api.post<{ domain: AdminDomain; dnsWarning?: string }>(
         endpoints.mail.admin.domains(serverId),
         payload,
       ),
@@ -137,11 +159,38 @@ export const mailAdminApi = {
         endpoints.mail.admin.domain(serverId, domain),
         patch,
       ),
-    delete: (serverId: string, domain: string) =>
-      api.delete<{ ok: boolean }>(endpoints.mail.admin.domain(serverId, domain)),
+    delete: (
+      serverId: string,
+      domain: string,
+      options: { cascade?: boolean } = {},
+    ) => {
+      const path = options.cascade
+        ? `${endpoints.mail.admin.domain(serverId, domain)}?cascade=true`
+        : endpoints.mail.admin.domain(serverId, domain);
+      return api.delete<{ ok: boolean }>(path);
+    },
     dependents: (serverId: string, domain: string) =>
       api.get<DomainDependents>(
         endpoints.mail.admin.domainDependents(serverId, domain),
+      ),
+    /**
+     * Fetch per-domain DNS state. Returns 404 when no records have been
+     * generated for the domain (e.g. the primary install domain — its
+     * records live on /mail/status as the install-time `dnsRecords`).
+     */
+    getDns: (serverId: string, domain: string) =>
+      api.get<AdditionalDomainDnsState>(
+        endpoints.mail.admin.domainDns(serverId, domain),
+      ),
+    /** Operator confirmed records are published. Banner stops rendering. */
+    acknowledgeDns: (serverId: string, domain: string) =>
+      api.post<{ ok: boolean }>(
+        endpoints.mail.admin.domainDnsAcknowledge(serverId, domain),
+      ),
+    /** List every additional-domain that still needs DNS published. */
+    pendingDns: (serverId: string) =>
+      api.get<{ pending: AdditionalDomainDnsState[] }>(
+        endpoints.mail.admin.pendingDomainDns(serverId),
       ),
   },
   mailboxes: {
@@ -180,4 +229,55 @@ export const mailAdminApi = {
     scan: (serverId: string) =>
       api.get<DnsScanResult>(endpoints.mail.admin.dnsScan(serverId)),
   },
+  testEmail: {
+    send: (serverId: string, to: string) =>
+      api.post<{ to: string; from: string; messageId: string }>(
+        endpoints.mail.admin.testEmail(serverId),
+        { to },
+      ),
+  },
+  components: {
+    action: (serverId: string, key: string, action: ComponentAction) =>
+      api.post<ComponentActionResult>(
+        endpoints.mail.admin.componentAction(serverId, key, action),
+      ),
+    logs: (serverId: string, key: string, lines?: number) => {
+      const base = endpoints.mail.admin.componentLogs(serverId, key);
+      const path =
+        typeof lines === "number" && lines > 0
+          ? `${base}?lines=${encodeURIComponent(String(lines))}`
+          : base;
+      return api.get<ComponentLogs>(path);
+    },
+    restartAll: (serverId: string) =>
+      api.post<BulkRestartResult>(
+        endpoints.mail.admin.componentsRestartAll(serverId),
+      ),
+  },
 };
+
+// ─── Component actions / logs ────────────────────────────────────────────────
+
+export type ComponentAction = "restart" | "start" | "stop";
+
+export interface ComponentActionResult {
+  key: string;
+  unit: string;
+  action: ComponentAction;
+  output: string;
+}
+
+export interface ComponentLogs {
+  key: string;
+  unit: string;
+  lines: string[];
+}
+
+export interface BulkRestartResult {
+  results: Array<{
+    key: string;
+    unit: string;
+    ok: boolean;
+    error?: string;
+  }>;
+}

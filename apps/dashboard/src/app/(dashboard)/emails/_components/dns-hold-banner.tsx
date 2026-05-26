@@ -23,7 +23,16 @@ interface DnsHoldBannerProps {
   records: DnsRecords;
   /** Mail domain (e.g. "oblien.com") — used to render Name as `@` / subdomain prefix. */
   domain: string;
-  resumeStep: number;
+  /**
+   * Install-flow uses this to render "The install resumes from step N (SSL
+   * certificate)". When omitted (e.g. the additional-domain banner), the
+   * resume copy is dropped — caller supplies its own `description` instead.
+   */
+  resumeStep?: number;
+  /** Override the default install-step heading. */
+  title?: string;
+  /** Override the default install-step description block. */
+  description?: React.ReactNode;
   acknowledging: boolean;
   onAcknowledge: () => void;
 }
@@ -89,10 +98,28 @@ export function DnsHoldBanner({
   records,
   domain,
   resumeStep,
+  title,
+  description,
   acknowledging,
   onAcknowledge,
 }: DnsHoldBannerProps) {
   const { showModal, hideModal } = useModal();
+
+  const heading = title ?? "Publish DNS records before continuing";
+  const body =
+    description ??
+    (resumeStep !== undefined ? (
+      <>
+        Mail delivery breaks without these. Add them at your DNS provider, then
+        click <strong>I've set the records — continue</strong> below. The
+        install resumes from step {resumeStep} (SSL certificate).
+      </>
+    ) : (
+      <>
+        Mail delivery breaks without these. Add them at your DNS provider, then
+        click <strong>I've set the records — continue</strong> below.
+      </>
+    ));
 
   const openAutoConfigure = () => {
     // Capture the modal id at the call-site so the close handlers inside
@@ -118,12 +145,10 @@ export function DnsHoldBanner({
         </div>
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-amber-900 dark:text-amber-100">
-            Publish DNS records before continuing
+            {heading}
           </h2>
           <p className="text-sm text-amber-900/80 dark:text-amber-100/80 mt-1 leading-snug">
-            Mail delivery breaks without these. Add them at your DNS provider,
-            then click <strong>I've set the records — continue</strong> below.
-            The install resumes from step {resumeStep} (SSL certificate).
+            {body}
           </p>
         </div>
       </div>

@@ -20,11 +20,20 @@ import { SYSTEM } from "@repo/core";
 import { notifyDeploySuccess, notifyBuildFailed } from "../../lib/notifications";
 import * as sessionManager from "./session-manager";
 import { detectAndStoreFavicon } from "../../lib/favicon-detector";
+import {
+  markWebmailInstalled,
+  mailServerIdFromWebmailSlug,
+} from "../mail/webmail/webmail-project.service";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface LifecycleContext {
-  runtime: RuntimeAdapter;
+  /**
+   * Optional — runtime is only touched when cleanup of a provisioned
+   * image or service container is needed. Bespoke pipelines (e.g.
+   * webmail) that don't go through `runtime.build` can omit it.
+   */
+  runtime?: RuntimeAdapter;
   project: Project;
   dep: Deployment;
   buildSessionId: string;
@@ -65,7 +74,7 @@ export async function onFailure(
 
   // 1. Force destroy provisioned resources — always delete the workspace/container
   //    on failure so the user doesn't have to manually clean up.
-  if (provisioned.imageRef) {
+  if (runtime && provisioned.imageRef) {
     try {
       await cleanupBuildArtifact(runtime, provisioned.imageRef);
     } catch (destroyErr) {
@@ -84,16 +93,18 @@ export async function onFailure(
     }
   }
 
-  const serviceDeps = await repos.service.listByDeployment(dep.id).catch(() => []);
-  for (const serviceDep of serviceDeps) {
-    if (!serviceDep.containerId) continue;
-    try {
-      await runtime.destroy(serviceDep.containerId);
-    } catch (destroyErr) {
-      console.error(
-        `[DEPLOY] Failed to destroy service container ${serviceDep.containerId} on failure:`,
-        destroyErr,
-      );
+  if (runtime) {
+    const serviceDeps = await repos.service.listByDeployment(dep.id).catch(() => []);
+    for (const serviceDep of serviceDeps) {
+      if (!serviceDep.containerId) continue;
+      try {
+        await runtime.destroy(serviceDep.containerId);
+      } catch (destroyErr) {
+        console.error(
+          `[DEPLOY] Failed to destroy service container ${serviceDep.containerId} on failure:`,
+          destroyErr,
+        );
+      }
     }
   }
 
@@ -126,7 +137,7 @@ export async function onCancelled(
   const { runtime, dep, buildSessionId, persistLogs, provisioned } = ctx;
 
   // Force destroy provisioned resources
-  if (provisioned.imageRef) {
+  if (runtime && provisioned.imageRef) {
     try {
       await cleanupBuildArtifact(runtime, provisioned.imageRef);
     } catch (destroyErr) {
@@ -147,7 +158,7 @@ export async function onCancelled(
   const serviceNameMap = new Map(services.map((s) => [s.id, s.name]));
 
   for (const serviceDep of serviceDeps) {
-    if (serviceDep.containerId) {
+    if (runtime && serviceDep.containerId) {
       await runtime.destroy(serviceDep.containerId).catch((err) => {
         console.error(`[DEPLOY] Failed to destroy service container ${serviceDep.containerId} on cancel:`, err);
       });
@@ -203,5 +214,13 @@ export async function onSuccess(
   // Async favicon detection — don't block the deploy response
   if (result.url) {
     void detectAndStoreFavicon(project.id, result.url);
+  }
+
+  // Webmail: flip mail-state `installed=true` so the /emails Open-webmail
+  // CTA can finally surface. Slug is the only carrier of mailServerId
+  // through the generic lifecycle — preserved by `ensureWebmailProject`.
+  if (project.framework === "webmail") {
+    const mailServerId = mailServerIdFromWebmailSlug(project.slug);
+    if (mailServerId) void markWebmailInstalled(mailServerId);
   }
 }

@@ -119,7 +119,7 @@ export class LocalExecutor implements CommandExecutor {
     localPath: string,
     remotePath: string,
     onLog?: (log: LogEntry) => void,
-    options?: { excludes?: string[]; includes?: string[] },
+    options?: { excludes?: string[]; includes?: string[]; mode?: "auto" | "tar" },
   ): Promise<void> {
     const log = onLog ?? (() => {});
 

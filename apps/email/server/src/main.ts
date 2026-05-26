@@ -2,15 +2,22 @@
  * Zero server entrypoint.
  *
  * Hono + Bun. Mounts:
- *   /auth/*      sign-in / sign-out / session
- *   /mail/idle   SSE bridge to IMAP IDLE
- *   /trpc/*      tRPC over HTTP (all the things)
+ *   /auth/*       sign-in / sign-out / session
+ *   /mail/idle    SSE bridge to IMAP IDLE
+ *   /admin/*      branding writes (token-gated)
+ *   /branding.*   branding read API + uploaded assets
+ *   /trpc/*       tRPC over HTTP (all the things)
+ *   /api/trpc/*   same — what the Zero client posts to
+ *   /*            client SPA (served from CLIENT_BUILD_DIR) with index.html
+ *                 fallback so client-side routes resolve.
  *
- * Bootstraps an SSE-friendly CORS policy so the client running on a
- * different origin (default :3000 → :3001) can hold the IDLE
- * connection open with credentials.
+ * Bootstraps an SSE-friendly CORS policy so the dashboard (on a different
+ * origin) can hold the IDLE connection open with credentials. Same-origin
+ * traffic from the SPA bypasses CORS entirely.
  */
 
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -129,6 +136,29 @@ app.use(
     allowMethodOverride: true,
   }),
 );
+
+// ─── Client SPA ──────────────────────────────────────────────────────────────
+//
+// In production we serve the React Router build from the same bun process
+// that handles the API — same origin, no CORS dance, no separate static
+// server. The vite/react-router build emits to `client/build/client/` of
+// the workspace; resolve that from this file's location so the path works
+// whether bun is invoked as `bun run server/src/main.ts` (from workspace
+// root) or `bun run src/main.ts` (from server/). CLIENT_BUILD_DIR overrides
+// for packaging layouts that put the assets elsewhere.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const clientBuildDir =
+  process.env.CLIENT_BUILD_DIR ?? resolvePath(__dirname, '../../client/build/client');
+
+// Static files: assets, fonts, manifest, etc. serveStatic falls through to
+// the next handler when a path doesn't resolve to a file on disk, which is
+// what lets the SPA fallback below handle client-side routes.
+app.use('/*', serveStatic({ root: clientBuildDir }));
+
+// SPA fallback — any unmatched GET serves index.html so React Router can
+// take over routing on the client. Registered last so it never shadows API
+// routes (those returned a response above and never fell through).
+app.get('*', serveStatic({ root: clientBuildDir, path: 'index.html' }));
 
 const port = env.PORT;
 console.log(`[zero] listening on http://localhost:${port}`);

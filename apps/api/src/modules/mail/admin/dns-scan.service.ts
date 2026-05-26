@@ -23,7 +23,6 @@ import {
   resolve6,
   resolveMx,
   resolveTxt,
-  resolveCname,
   reverse,
 } from "node:dns/promises";
 import { sshManager } from "../../../lib/ssh-manager";
@@ -64,8 +63,6 @@ interface ExpectedRecords {
   spf?: ExpectedRecord;
   dkim?: ExpectedRecord;
   dmarc?: ExpectedRecord;
-  autodiscoverCname?: ExpectedRecord;
-  autoconfigCname?: ExpectedRecord;
 }
 
 export interface DnsScanResult {
@@ -99,8 +96,6 @@ export async function scanDns(serverId: string): Promise<DnsScanResult> {
     checkSpf(domain, expected.spf),
     checkDkim(domain, expected.dkim),
     checkDmarc(domain, expected.dmarc),
-    checkCname("autodiscover", `autodiscover.${domain}`, expected.autodiscoverCname),
-    checkCname("autoconfig", `autoconfig.${domain}`, expected.autoconfigCname),
     checkPtr(expected.a, domain),
   ]);
 
@@ -343,50 +338,6 @@ async function checkDmarc(
     };
   } catch (err) {
     return missing("dmarc", "DMARC policy", name, "TXT", exp.value, err);
-  }
-}
-
-async function checkCname(
-  key: string,
-  name: string,
-  exp?: ExpectedRecord,
-): Promise<DnsCheck | null> {
-  if (!exp?.value) return null;
-  const wanted = trimDot(exp.value);
-  try {
-    const cnames = await resolveCname(name);
-    const matched = cnames.some((c) => trimDot(c) === wanted);
-    return {
-      key,
-      label: `${key} CNAME`,
-      description:
-        "Optional. Lets mail clients auto-discover the server when the user enters their email.",
-      queriedName: name,
-      recordType: "CNAME",
-      status: matched ? "pass" : "warn",
-      expected: wanted,
-      actual: cnames.join(", "),
-      message: matched
-        ? "CNAME points to the mail host."
-        : `CNAME exists but resolves to ${cnames.join(", ")} instead of ${wanted}.`,
-    };
-  } catch (err) {
-    if (isNotFound(err)) {
-      return {
-        key,
-        label: `${key} CNAME`,
-        description:
-          "Optional. Lets mail clients auto-discover the server when the user enters their email.",
-        queriedName: name,
-        recordType: "CNAME",
-        status: "warn",
-        expected: wanted,
-        actual: "",
-        message:
-          "CNAME not published. Mail clients can still be set up manually; this just streamlines it.",
-      };
-    }
-    return missing(key, `${key} CNAME`, name, "CNAME", wanted, err);
   }
 }
 

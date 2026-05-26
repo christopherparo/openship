@@ -883,13 +883,10 @@ export async function stepDkimKeys(
   // single source of truth in the dashboard — handy if they're auditing
   // their DNS or migrating providers.
   //
-  // The 2 client-autoconfig CNAMEs are forward-looking: they point at
-  // `mail.<domain>` so once openship's autodiscover/autoconfig XML
-  // responders ship (ARCHITECTURE.md Phase 7), email clients pick up
-  // server settings automatically.
-  //
-  // SRV records (RFC 6186) were considered and dropped: `_autodiscover._tcp`
-  // duplicates the CNAME, and `_imaps._tcp` / `_submission._tcp` are
+  // We intentionally do NOT recommend autodiscover/autoconfig CNAMEs:
+  // they only help when paired with an XML responder, which openship
+  // doesn't ship; without it they only mislead. SRV records (RFC 6186)
+  // are similarly omitted — `_imaps._tcp` / `_submission._tcp` are
   // honoured by ~nobody in practice.
   const dnsRecords: Record<string, unknown> = {
     ...(ipv4 && {
@@ -933,19 +930,6 @@ export async function stepDkimKeys(
       value: `v=DMARC1; p=quarantine; rua=mailto:postmaster@${domain}`,
       required: true,
     },
-    // ── Client autoconfig (forward-looking) ───────────────────────
-    autodiscoverCname: {
-      type: "CNAME",
-      name: `autodiscover.${domain}`,
-      value: mailDomain,
-      required: false,
-    },
-    autoconfigCname: {
-      type: "CNAME",
-      name: `autoconfig.${domain}`,
-      value: mailDomain,
-      required: false,
-    },
   };
 
   log(11, "info", "DKIM keys retrieved — DNS records ready");
@@ -955,6 +939,154 @@ export async function stepDkimKeys(
     message: "DKIM keys retrieved",
     data: { dnsRecords, rawOutput },
   };
+}
+
+/**
+ * Provision a DKIM keypair for an additional domain (one added via the
+ * admin panel after the primary install). Mirrors what step 11 does for
+ * the primary domain, but scoped to a single new domain that gets
+ * appended to the existing amavis setup.
+ *
+ * Sequence:
+ *   1. Probe amavis binary (`amavisd` on noble, `amavisd-new` on jammy).
+ *   2. `amavisd genrsa /var/lib/dkim/<domain>.pem` — generates the keypair.
+ *   3. Read /etc/amavis/conf.d/50-user, append the `dkim_key('<domain>', …)`
+ *      directive + the per-domain entry in
+ *      `@dkim_signature_options_bysender_maps`, write it back. All string
+ *      manipulation happens in JS — no shell escaping, no `perl -i`.
+ *   4. Reload amavis so the new key + sign-options take effect.
+ *   5. `amavisd showkeys <domain>` to extract the public-key TXT value.
+ *
+ * Returns the `v=DKIM1; p=…` TXT-record value the operator publishes at
+ * `dkim._domainkey.<domain>`.
+ */
+export async function provisionDomainDkim(
+  exec: CommandExecutor,
+  newDomain: string,
+): Promise<string> {
+  // ── Step 1: pick the right amavis binary ─────────────────────────────
+  const probe = await exec.exec(
+    "if command -v amavisd >/dev/null 2>&1; then echo amavisd; " +
+      "elif command -v amavisd-new >/dev/null 2>&1; then echo amavisd-new; " +
+      "else echo MISSING; fi",
+  );
+  const amavisBin = probe.trim();
+  if (amavisBin === "MISSING") {
+    throw new Error(
+      "Neither `amavisd` nor `amavisd-new` is installed — can't provision DKIM.",
+    );
+  }
+
+  // ── Step 2: generate the keypair ─────────────────────────────────────
+  const keyPath = `/var/lib/dkim/${newDomain}.pem`;
+  await exec.exec(`mkdir -p /var/lib/dkim`);
+  // amavisd genrsa exits non-zero if the file already exists; treat that
+  // as success so re-runs are idempotent.
+  await exec.exec(
+    `[ -s ${keyPath} ] || ${amavisBin} genrsa ${keyPath}`,
+  );
+  await exec.exec(`chown -R amavis:amavis /var/lib/dkim 2>/dev/null || true`);
+
+  // ── Step 3: splice the directive + sign-options entry into 50-user ───
+  const confPath = "/etc/amavis/conf.d/50-user";
+  const existing = await exec.readFile(confPath).catch(() => "");
+  const dkimKeyLine = `dkim_key('${newDomain}', 'dkim', '${keyPath}');`;
+  const signEntry = `   '.${newDomain}'  => { d => '${newDomain}', a => 'rsa-sha256', ttl => 21*24*3600 },`;
+  const next = spliceAmavisConf(existing, newDomain, dkimKeyLine, signEntry);
+  if (next !== existing) {
+    await exec.writeFile(confPath, next);
+  }
+
+  // ── Step 4: reload amavis ────────────────────────────────────────────
+  await exec.exec(
+    "systemctl reload amavis 2>/dev/null || systemctl reload amavisd 2>/dev/null || " +
+      "systemctl restart amavis 2>/dev/null || systemctl restart amavisd 2>/dev/null || true",
+  );
+
+  // ── Step 5: read the public key out ──────────────────────────────────
+  const showOutput = await exec.exec(`${amavisBin} showkeys ${newDomain} 2>&1`);
+  const matches = showOutput.match(/"([^"]+)"/g);
+  const dkimValue = matches
+    ? matches.map((m: string) => m.replace(/"/g, "")).join("").replace(/\s+/g, "")
+    : "";
+  if (!dkimValue) {
+    throw new Error(
+      `Could not parse DKIM key from \`${amavisBin} showkeys ${newDomain}\` output: ${showOutput.slice(0, 200)}`,
+    );
+  }
+  return dkimValue;
+}
+
+/**
+ * Pure helper for editing /etc/amavis/conf.d/50-user. Adds the two
+ * directives the per-domain key needs, idempotently.
+ *
+ *   - `dkim_key(...)` — appended at the end of the file if not already
+ *     present (matched by substring on the exact key file path).
+ *   - `'.<domain>' => { d => ..., a => ..., ttl => ... }` — spliced
+ *     inside the `@dkim_signature_options_bysender_maps = ( ( … ) );`
+ *     block, just before the inner closing `)`. iRedMail's primary
+ *     install writes that array during the original step 11, so the
+ *     block is always present.
+ *
+ * Returns the new file content (or the original string if nothing
+ * changed, so the caller can skip the write).
+ */
+export function spliceAmavisConf(
+  conf: string,
+  newDomain: string,
+  dkimKeyLine: string,
+  signEntry: string,
+): string {
+  let out = conf;
+
+  if (!out.includes(dkimKeyLine)) {
+    if (out.length > 0 && !out.endsWith("\n")) out += "\n";
+    out += `${dkimKeyLine}\n`;
+  }
+
+  // Detect "already in the bysender map" via a substring check that won't
+  // false-positive on e.g. an apostrophe in a comment.
+  const senderMarker = `'.${newDomain}'`;
+  if (!out.includes(senderMarker)) {
+    // Find the line where the bysender map opens, then the matching
+    // inner `)` (the one that closes the first sub-list), and splice the
+    // new entry before it.
+    const openRe = /@dkim_signature_options_bysender_maps\s*=\s*\(/;
+    const m = openRe.exec(out);
+    if (m) {
+      // Walk forward from the open and find the matching closing `)` of
+      // the OUTER list. iRedMail's format is:
+      //   @dkim_signature_options_bysender_maps = ( {
+      //     '.example.com' => { ... },
+      //     ...
+      //   } );
+      // We splice just before the closing `}`, inside the hash.
+      const startIdx = m.index + m[0].length;
+      let depth = 1;
+      let i = startIdx;
+      while (i < out.length && depth > 0) {
+        const ch = out[i];
+        if (ch === "(" || ch === "{") depth++;
+        else if (ch === ")" || ch === "}") {
+          depth--;
+          if (depth === 0) break;
+        }
+        i++;
+      }
+      // i now points at the outer-closing char of the block.
+      // Backtrack to the start of that line so the splice indents cleanly.
+      let lineStart = i;
+      while (lineStart > 0 && out[lineStart - 1] !== "\n") lineStart--;
+      out = `${out.slice(0, lineStart)}${signEntry}\n${out.slice(lineStart)}`;
+    }
+    // If the marker is missing entirely (not the iRedMail format we expect),
+    // we silently skip — the `dkim_key` directive alone is enough for
+    // amavis to load the key; signing for the new domain just won't kick
+    // in until the operator wires up that map manually.
+  }
+
+  return out;
 }
 
 /**

@@ -3,27 +3,25 @@
 /**
  * Overview tab — what an operator wants on day one.
  *
- * Layout matches the rest of the dashboard (DashboardHomeClient pattern):
+ * Order (top → bottom, left column):
+ *   1. Mail server card   — combined identity + webmail CTA. Big hostname,
+ *                            "Open webmail" primary action, "Protocol
+ *                            details →" link to the Advanced tab. Webmail
+ *                            is bundled with openship, so it's always
+ *                            available — no deploy gate needed.
+ *   2. Setup guides       — 4-up banner that routes to /emails/setup-guides.
  *
- *   Left column (1fr):
- *     1. Credentials card  — username + masked password + change-inline.
- *     2. Server settings    — IMAP/SMTP host, port, encryption.
- *     3. Setup guides       — banner card with 4 entry points that route
- *                             to /emails/setup-guides/<client>/ pages.
- *     4. Webmail            — sign-in URL + "coming soon" badge for Zero.
+ * Right column (340px, sticky):
+ *   1. Mail stats         — domain/mailbox/alias/storage/message counts.
+ *   2. Quick actions      — links into other tabs.
  *
- *   Right column (340px, sticky):
- *     1. Mail stats     — domain/mailbox/alias/storage/message counts.
- *     2. Quick actions  — links into other tabs.
+ * The postmaster account is just another row in `vmail.mailbox`. The
+ * operator manages its password the same way they manage every other
+ * mailbox — Mailboxes tab → edit row → set password. There's no separate
+ * credentials card here on purpose: one place for one operation.
  *
- * Visual baseline matches DashboardHomeClient and HomeTipCard:
- *   - Single-padded cards (`p-5`), inline icon + heading at the top,
- *     NO separate `px-5 py-4 border-b` header bar.
- *   - Icons are size-4 / size-[18px] in muted-coloured boxes — no
- *     rainbow per-card colour.
- *   - Status / accent colours reserved for status pills.
- *
- * Components/daemon health is NOT here — that's the Components tab.
+ * Protocol details (host:port + encryption) live in the Advanced tab —
+ * useful when wiring a client by hand but noise on the overview.
  */
 
 import { useEffect, useState } from "react";
@@ -31,33 +29,27 @@ import Link from "next/link";
 import {
   Activity,
   ArrowRight,
+  ArrowUpRight,
   Check,
   ChevronRight,
   Code2,
   Copy,
-  Eye,
-  EyeOff,
   Globe,
   Inbox,
-  KeyRound,
-  Loader2,
   Mail,
-  Send,
-  Settings2,
-  Smartphone,
   Sparkles,
+  Upload,
   UserPlus,
   UserRound,
   HardDrive,
   Apple,
-  Lock,
+  Smartphone,
 } from "lucide-react";
 import {
-  mailApi,
   mailAdminApi,
-  type MailCredentials,
   type MailServerStats,
   type MailSetupStatus,
+  type MailWebmailSummary,
 } from "@/lib/api";
 import { Skeleton } from "./_shared/skeleton";
 
@@ -67,26 +59,19 @@ interface OverviewTabProps {
   onRefresh: () => void;
 }
 
-export function OverviewTab({ status, serverId, onRefresh }: OverviewTabProps) {
+export function OverviewTab({ status, serverId }: OverviewTabProps) {
   const domain = status.domain ?? "";
   const mailHost = domain ? `mail.${domain}` : "";
-  const webmailUrl = mailHost ? `https://${mailHost}/` : "";
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
       <div className="space-y-5 min-w-0">
-        {status.credentials && (
-          <CredentialsCard
-            credentials={status.credentials}
-            serverId={serverId}
-            onChanged={onRefresh}
-          />
-        )}
-        {status.credentials && (
-          <ServerSettingsCard credentials={status.credentials} />
-        )}
+        <MailServerCard
+          mailHost={mailHost}
+          serverId={serverId}
+          webmail={status.webmail}
+        />
         <SetupGuidesBanner serverId={serverId} />
-        <WebmailCard webmailUrl={webmailUrl} mailHost={mailHost} />
       </div>
 
       <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
@@ -97,322 +82,117 @@ export function OverviewTab({ status, serverId, onRefresh }: OverviewTabProps) {
   );
 }
 
-// ─── Credentials ─────────────────────────────────────────────────────────────
+// ─── Mail server + webmail (combined hero card) ──────────────────────────────
 
-function CredentialsCard({
-  credentials,
+/**
+ * Single editorial card at the top of the overview. Combines mail-server
+ * identity (the hostname) with the webmail CTA.
+ *
+ * Webmail state is read from `status.webmail` — the openship API persists
+ * the deploy record in the mail-state file on the VPS. If the record is
+ * absent (or `installed=false`), the operator sees a Deploy webmail CTA
+ * that opens a modal — domain + host picker + live SSE progress. Once
+ * deployed, the same slot becomes an Open webmail link.
+ */
+function MailServerCard({
+  mailHost,
   serverId,
-  onChanged,
+  webmail,
 }: {
-  credentials: MailCredentials;
+  mailHost: string;
   serverId: string;
-  onChanged: () => void;
-}) {
-  const [revealed, setRevealed] = useState(false);
-  const [editing, setEditing] = useState(false);
-
-  return (
-    <div className="bg-card rounded-2xl border border-border/50">
-      <div className="flex items-center gap-2 px-5 pt-5 pb-4">
-        <KeyRound className="size-4 text-muted-foreground" strokeWidth={2} />
-        <h3 className="font-semibold text-foreground text-sm">
-          Postmaster credentials
-        </h3>
-      </div>
-      <div className="border-t border-border/40 divide-y divide-border/40">
-        <CredentialRow label="Username" value={credentials.username} />
-        {editing ? (
-          <ChangePasswordRow
-            serverId={serverId}
-            onCancel={() => setEditing(false)}
-            onSaved={() => {
-              setEditing(false);
-              onChanged();
-            }}
-          />
-        ) : (
-          <CredentialRow
-            label="Password"
-            value={credentials.password}
-            masked={!revealed}
-            isFontMono
-            onToggleMask={() => setRevealed((v) => !v)}
-            trailingAction={
-              <button
-                onClick={() => setEditing(true)}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-muted/50"
-              >
-                Change
-              </button>
-            }
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CredentialRow({
-  label,
-  value,
-  masked,
-  isFontMono,
-  onToggleMask,
-  trailingAction,
-}: {
-  label: string;
-  value: string;
-  masked?: boolean;
-  isFontMono?: boolean;
-  onToggleMask?: () => void;
-  trailingAction?: React.ReactNode;
+  webmail?: MailWebmailSummary;
 }) {
   const [copied, setCopied] = useState(false);
-  const display = masked ? "•".repeat(Math.min(value.length, 22)) : value;
+
   const copy = async () => {
+    if (!mailHost) return;
     try {
-      await navigator.clipboard.writeText(value);
+      await navigator.clipboard.writeText(mailHost);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
-      /* HTTP fallback */
-    }
-  };
-  return (
-    <div className="flex items-center gap-4 px-5 py-3.5">
-      <div className="w-24 text-xs font-medium text-muted-foreground shrink-0">
-        {label}
-      </div>
-      <div
-        className={`min-w-0 flex-1 text-[13px] text-foreground truncate ${
-          isFontMono ? "font-mono" : ""
-        }`}
-      >
-        {display}
-      </div>
-      {onToggleMask && (
-        <button
-          onClick={onToggleMask}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-          title={masked ? "Reveal" : "Hide"}
-        >
-          {masked ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-        </button>
-      )}
-      <button
-        onClick={copy}
-        className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-        title="Copy"
-      >
-        {copied ? (
-          <Check className="size-3.5 text-emerald-500" />
-        ) : (
-          <Copy className="size-3.5" />
-        )}
-      </button>
-      {trailingAction}
-    </div>
-  );
-}
-
-function ChangePasswordRow({
-  serverId,
-  onCancel,
-  onSaved,
-}: {
-  serverId: string;
-  onCancel: () => void;
-  onSaved: () => void;
-}) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [reveal, setReveal] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const validate = (): string | null => {
-    if (password.length < 12) return "Password must be at least 12 characters.";
-    if (password !== confirm) return "Passwords don't match.";
-    return null;
-  };
-
-  const generate = () => {
-    const buf = new Uint8Array(18);
-    crypto.getRandomValues(buf);
-    const b64 = btoa(String.fromCharCode(...buf))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-    setPassword(b64);
-    setConfirm(b64);
-    setReveal(true);
-  };
-
-  const submit = async () => {
-    const v = validate();
-    if (v) {
-      setError(v);
-      return;
-    }
-    setError(null);
-    setSaving(true);
-    try {
-      await mailApi.setPostmasterPassword(serverId, password);
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Password change failed");
-    } finally {
-      setSaving(false);
+      /* noop */
     }
   };
 
-  const inputCls =
-    "flex-1 min-w-0 px-3 py-2 rounded-xl border border-border bg-background text-[13px] font-mono text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/60 transition-colors";
+  const isInstalled = Boolean(webmail?.installed && webmail.url);
 
-  return (
-    <div className="px-5 py-4 space-y-3 bg-muted/20">
-      <div className="flex items-center gap-4">
-        <div className="w-24 text-xs font-medium text-muted-foreground shrink-0">
-          New password
-        </div>
-        <input
-          type={reveal ? "text" : "password"}
-          autoFocus
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="At least 12 characters"
-          className={inputCls}
-        />
-        <button
-          onClick={() => setReveal((v) => !v)}
-          type="button"
-          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-        >
-          {reveal ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-        </button>
-      </div>
-      <div className="flex items-center gap-4">
-        <div className="w-24 text-xs font-medium text-muted-foreground shrink-0">
-          Confirm
-        </div>
-        <input
-          type={reveal ? "text" : "password"}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          placeholder="Type it again"
-          className={inputCls}
-        />
-        <div className="w-7" />
-      </div>
-      {error && (
-        <p className="text-xs text-red-600 dark:text-red-400 ml-28">{error}</p>
-      )}
-      <div className="flex items-center justify-between ml-28 pt-1">
-        <button
-          onClick={generate}
-          type="button"
-          className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Generate strong password
-        </button>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onCancel}
-            type="button"
-            className="px-3 py-1.5 text-xs font-medium rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={saving}
-            type="button"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            {saving && <Loader2 className="size-3 animate-spin" />}
-            Save password
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Server settings ─────────────────────────────────────────────────────────
-
-function ServerSettingsCard({ credentials }: { credentials: MailCredentials }) {
   return (
     <div className="bg-card rounded-2xl border border-border/50 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <Settings2 className="size-4 text-muted-foreground" strokeWidth={2} />
-        <h3 className="font-semibold text-foreground text-sm">Server settings</h3>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <Inbox className="size-4 text-muted-foreground" strokeWidth={2} />
+          <h3 className="font-semibold text-foreground text-sm">Mail server</h3>
+        </div>
+        <Link
+          href="?tab=advanced"
+          replace
+          scroll={false}
+          className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Protocol details →
+        </Link>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <ServerSettingBlock
-          icon={Inbox}
-          label="Incoming · IMAP"
-          host={credentials.imapHost}
-          port={credentials.imapPort}
-          encryption="SSL/TLS"
-        />
-        <ServerSettingBlock
-          icon={Send}
-          label="Outgoing · SMTP"
-          host={credentials.smtpHost}
-          port={credentials.smtpPort}
-          encryption="STARTTLS"
-        />
-      </div>
-      <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-2.5">
-        <p className="text-xs text-foreground/90 leading-relaxed">
-          <Lock className="inline-block size-3 mr-1 -mt-0.5 text-muted-foreground" />
-          Username on both servers is your <strong>full email address</strong>
-          {" "}— e.g.{" "}
-          <code className="font-mono text-[11.5px] px-1 py-0.5 rounded bg-card border border-border/40">
-            {credentials.username}
-          </code>
-          . Password is the one in the card above.
-        </p>
-      </div>
-    </div>
-  );
-}
 
-function ServerSettingBlock({
-  icon: Icon,
-  label,
-  host,
-  port,
-  encryption,
-}: {
-  icon: typeof Inbox;
-  label: string;
-  host: string;
-  port: number;
-  encryption: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
-      <div className="flex items-center gap-2 mb-2.5">
-        <Icon className="size-3.5 text-muted-foreground" strokeWidth={2} />
-        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
-          {label}
-        </p>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground mb-1.5">
+            Hostname
+          </p>
+          <button
+            type="button"
+            onClick={copy}
+            className="group inline-flex items-center gap-2 -mx-1 px-1 py-0.5 rounded-md hover:bg-muted/40 transition-colors"
+          >
+            <span className="text-lg font-semibold text-foreground tracking-tight break-all">
+              {mailHost || "—"}
+            </span>
+            {mailHost && (
+              <span className="text-muted-foreground/70 group-hover:text-foreground transition-colors shrink-0">
+                {copied ? (
+                  <Check className="size-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+              </span>
+            )}
+          </button>
+          {isInstalled && webmail && (
+            <p className="text-xs text-muted-foreground mt-1.5 break-all">
+              Webmail at{" "}
+              <a
+                href={webmail.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground font-medium hover:underline"
+              >
+                {webmail.hostname}
+              </a>
+            </p>
+          )}
+        </div>
+
+        {isInstalled && webmail ? (
+          <a
+            href={webmail.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
+          >
+            Open webmail
+            <ArrowUpRight className="size-3.5" strokeWidth={2.25} />
+          </a>
+        ) : (
+          <Link
+            href={`/deploy/mail?serverId=${encodeURIComponent(serverId)}`}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
+          >
+            <Upload className="size-3.5" strokeWidth={2.25} />
+            Deploy webmail
+          </Link>
+        )}
       </div>
-      <dl className="space-y-1.5 text-[13px]">
-        <div className="flex items-center gap-3">
-          <dt className="w-16 text-xs text-muted-foreground">Host</dt>
-          <dd className="font-mono text-foreground truncate">{host}</dd>
-        </div>
-        <div className="flex items-center gap-3">
-          <dt className="w-16 text-xs text-muted-foreground">Port</dt>
-          <dd className="font-mono text-foreground">{port}</dd>
-        </div>
-        <div className="flex items-center gap-3">
-          <dt className="w-16 text-xs text-muted-foreground">Security</dt>
-          <dd className="font-mono text-foreground">{encryption}</dd>
-        </div>
-      </dl>
     </div>
   );
 }
@@ -489,46 +269,6 @@ function GuideCard({
       </div>
       <ChevronRight className="size-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors shrink-0" />
     </Link>
-  );
-}
-
-// ─── Webmail ─────────────────────────────────────────────────────────────────
-
-function WebmailCard({
-  webmailUrl,
-  mailHost,
-}: {
-  webmailUrl: string;
-  mailHost: string;
-}) {
-  return (
-    <div className="bg-card rounded-2xl border border-border/50 p-5">
-      <div className="flex items-center gap-2 mb-1">
-        <Inbox className="size-4 text-muted-foreground" strokeWidth={2} />
-        <h3 className="font-semibold text-foreground text-sm">Webmail</h3>
-      </div>
-      <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-        A browser inbox will deploy at{" "}
-        <code className="font-mono text-[12px] px-1.5 py-0.5 rounded bg-muted/60 text-foreground">
-          {mailHost || "mail.<your-domain>"}
-        </code>{" "}
-        in a future release. Until then, use any mail client with the
-        credentials above.
-      </p>
-      <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wide font-medium text-muted-foreground mb-0.5">
-            Sign-in URL
-          </p>
-          <p className="text-sm font-mono text-foreground truncate">
-            {webmailUrl || "—"}
-          </p>
-        </div>
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-medium shrink-0">
-          Coming soon
-        </span>
-      </div>
-    </div>
   );
 }
 

@@ -40,3 +40,5 @@ data/
 *.log
 npm-debug.log*
 pnpm-debug.log*
+.react-router
+.wrangler

@@ -17,6 +17,10 @@ import { NotFoundError } from "@repo/core";
 import { platform } from "../../lib/controller-helpers";
 import { resolveDeploymentRuntime } from "../../lib/deployment-runtime";
 import { buildServiceRouteDomain } from "../../lib/routing-domains";
+import {
+  cleanupWebmailInstall,
+  mailServerIdFromWebmailSlug,
+} from "../mail/webmail/webmail-project.service";
 
 // ─── Resource Manifest ───────────────────────────────────────────────────────
 
@@ -318,7 +322,7 @@ export async function deleteProject(
 
   // 3. Background cleanup (fire-and-forget) using the manifests we captured.
   for (const { project, manifest } of manifests) {
-    cleanupProjectResources(manifest, project.id).catch((err) =>
+    cleanupProjectResources(manifest, project).catch((err) =>
       console.error(`[PROJECT] Background cleanup failed for ${project.id}:`, err),
     );
   }
@@ -329,7 +333,7 @@ export async function deleteProject(
 /** Internal: runs after soft-delete, outside the request lifecycle. */
 async function cleanupProjectResources(
   manifest: CleanupManifest,
-  projectId: string,
+  project: Project,
 ): Promise<void> {
   // 1. Destroy resources with bounded concurrency (containers, images, routes).
   //    On cloud, destroying the workspace also frees the Oblien-side route;
@@ -337,12 +341,23 @@ async function cleanupProjectResources(
   const result = await executeCleanup(manifest);
   if (result.failed.length > 0) {
     console.error(
-      `[PROJECT] Cleanup for ${projectId}: ${result.succeeded}/${result.total} succeeded, ` +
+      `[PROJECT] Cleanup for ${project.id}: ${result.succeeded}/${result.total} succeeded, ` +
         `${result.failed.length} failed:`,
       result.failed.map((f) => `${f.label}: ${f.error}`),
     );
   }
 
-  // 2. DB cleanup (hard-delete deployments + build sessions).
-  await repos.deployment.deleteByProjectId(projectId);
+  // 2. Framework-specific teardown that's not in the generic manifest.
+  //    Webmail keeps a branding dir outside the workspace and a block in the
+  //    mail-state file; both have to be wiped explicitly so a future re-deploy
+  //    starts fresh.
+  if (project.framework === "webmail") {
+    const mailServerId = mailServerIdFromWebmailSlug(project.slug);
+    if (mailServerId) {
+      await cleanupWebmailInstall({ mailServerId });
+    }
+  }
+
+  // 3. DB cleanup (hard-delete deployments + build sessions).
+  await repos.deployment.deleteByProjectId(project.id);
 }

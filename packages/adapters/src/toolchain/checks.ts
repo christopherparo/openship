@@ -177,5 +177,11 @@ export async function checkToolchainForStack(
     return { tools: [], ready: true, missing: [], outdated: [] };
   }
 
+  // Stacks may override the language tool list (e.g. webmail uses bun rather
+  // than node). When set, it replaces — not extends — the language list.
+  if (stack.requiredTools && stack.requiredTools.length > 0) {
+    return checkTools(executor, stack.requiredTools, stack.requiredToolVersions);
+  }
+
   return checkToolchain(executor, stack.language, stack.requiredToolVersions);
 }

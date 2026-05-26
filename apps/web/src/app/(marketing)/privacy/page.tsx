@@ -1,8 +1,25 @@
+import type { Metadata } from "next";
 import { Navbar, Footer } from "@/components/landing";
 
-export const metadata = {
-  title: "Privacy · Openship",
-  description: "How Openship handles your data.",
+const PAGE_TITLE = "Privacy Policy";
+const PAGE_DESCRIPTION =
+  "How Openship handles your data. What we collect, why, where it lives, how to remove it. We do not sell personal data and we do not show ads.";
+
+export const metadata: Metadata = {
+  title: PAGE_TITLE,
+  description: PAGE_DESCRIPTION,
+  alternates: { canonical: "/privacy" },
+  openGraph: {
+    title: `${PAGE_TITLE} — Openship`,
+    description: PAGE_DESCRIPTION,
+    url: "/privacy",
+    type: "article",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${PAGE_TITLE} — Openship`,
+    description: PAGE_DESCRIPTION,
+  },
 };
 
 const SECTIONS = [

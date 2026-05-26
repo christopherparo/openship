@@ -1,6 +1,16 @@
 {
-  "extends": "../../../tsconfig.base.json",
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "sourceMap": true,
     "lib": ["dom", "dom.iterable", "esnext"],
     "types": ["node", "vite/client"],
     "jsx": "react-jsx",
@@ -13,5 +23,5 @@
     "rootDirs": [".", "./.react-router/types"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", ".react-router"]
+  "exclude": ["node_modules", ".react-router", "dist"]
 }

@@ -261,6 +261,19 @@ function composerInstallPlan(profile: EnvironmentProfile): ToolchainInstallPlan 
   };
 }
 
+function bunInstallPlan(_profile: EnvironmentProfile): ToolchainInstallPlan {
+  // Bun ships a single installer that works on Linux + macOS, arch-detected.
+  // Pin a version so toolchain installs are deterministic across hosts.
+  return {
+    supported: true,
+    installCommand: [
+      "curl -fsSL https://bun.sh/install | bash -s 'bun-v1.2.0'",
+      "ln -sf $HOME/.bun/bin/bun /usr/local/bin/bun",
+    ].join(" && "),
+    verifyCommand: "bun --version",
+  };
+}
+
 function pipInstallPlan(profile: EnvironmentProfile): ToolchainInstallPlan {
   const commands: Record<string, string> = {
     apt: "apt-get update -qq && apt-get install -y -qq python3-pip",
@@ -300,6 +313,13 @@ export const toolchainCatalog = {
       versionCommand: "node --version",
       parseVersion: (output: string) => output.replace(/^v/, "").trim(),
       missingMessage: "Node.js is not installed",
+      installable: true,
+    },
+    bun: {
+      label: "Bun",
+      versionCommand: "bun --version",
+      parseVersion: (output: string) => output.trim(),
+      missingMessage: "Bun is not installed",
       installable: true,
     },
     npm: {
@@ -424,6 +444,7 @@ export const toolchainCatalog = {
    */
   installs: {
     node: nodeInstallPlan,
+    bun: bunInstallPlan,
     go: goInstallPlan,
     rustc: rustInstallPlan,
     python3: pythonInstallPlan,

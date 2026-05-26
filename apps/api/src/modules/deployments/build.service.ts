@@ -201,7 +201,7 @@ function throwPreflightFailure(preflight: PreflightResult): never {
 }
 
 /** Wrap a snapshot with the project's currently-active deployment id (rollback target). */
-function metaWithPrevious(
+export function metaWithPrevious(
   snapshot: DeploymentConfigSnapshot,
   project: Project,
 ): DeploymentConfigSnapshot {
@@ -233,7 +233,7 @@ async function resolveServicePipelineMode(
 }
 
 /** Run preflight against a snapshot+route state and throw a structured failure on any check fail. */
-async function runDeploymentPreflight(
+export async function runDeploymentPreflight(
   snapshot: DeploymentConfigSnapshot,
   routeState: Awaited<ReturnType<typeof resolveProjectRouteState>>,
   opts: {
@@ -355,7 +355,7 @@ export interface BuildAccessInput {
 
 /** Build a config snapshot from the project — pure pass-through, no fallbacks.
  *  All values must be set by prepare / ensureProject before this is called. */
-function buildConfigSnapshot(
+export function buildConfigSnapshot(
   project: Project,
   branch?: string,
 ): DeploymentConfigSnapshot {
@@ -448,7 +448,7 @@ function resolveStaticOutputDirectory(outputDirectory: string, targetPath?: stri
 }
 
 /** Encrypt a plaintext key-value map. Returns null if empty. */
-function encryptEnvVars(envVars?: Record<string, string>): Record<string, string> | null {
+export function encryptEnvVars(envVars?: Record<string, string>): Record<string, string> | null {
   if (!envVars || Object.keys(envVars).length === 0) return null;
   const encrypted: Record<string, string> = {};
   for (const [k, v] of Object.entries(envVars)) {
@@ -504,7 +504,7 @@ async function checkNoActiveBuild(projectId: string) {
  * Create a queued deployment + build session atomically.
  * If the build session insert fails, the deployment is cleaned up.
  */
-async function createQueuedDeployment(opts: {
+export async function createQueuedDeployment(opts: {
   projectId: string;
   userId: string;
   branch: string;

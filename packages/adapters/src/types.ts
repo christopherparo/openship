@@ -321,7 +321,17 @@ export interface CommandExecutor {
     localPath: string,
     remotePath: string,
     onLog?: (log: LogEntry) => void,
-    options?: { excludes?: string[]; includes?: string[] },
+    options?: {
+      excludes?: string[];
+      includes?: string[];
+      /**
+       * Transfer strategy. Defaults to `"auto"`: tries rsync first, falls back
+       * to a tar pipe over the existing SSH connection. Pass `"tar"` to skip
+       * rsync entirely — useful for first-time transfers of large trees with
+       * many small files, where rsync's per-file overhead dominates.
+       */
+      mode?: "auto" | "tar";
+    },
   ): Promise<void>;
 
   /** Clean up connections / resources. */

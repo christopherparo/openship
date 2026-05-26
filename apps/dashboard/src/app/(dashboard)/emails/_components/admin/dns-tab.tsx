@@ -108,8 +108,8 @@ function Header() {
       <h2 className="text-lg font-semibold text-foreground">DNS records</h2>
       <p className="text-sm text-muted-foreground mt-0.5 max-w-2xl">
         The records that need to exist at your DNS provider for mail
-        delivery + client autoconfig. Reference copy — for "is this actually
-        live?", use the Health tab's DNS scan.
+        delivery. Reference copy — for "is this actually live?", use the
+        Health tab's DNS scan.
       </p>
     </div>
   );

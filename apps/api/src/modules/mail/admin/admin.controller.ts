@@ -35,6 +35,19 @@ import {
 } from "./mailboxes.service";
 import { getMailServerStats } from "./stats.service";
 import { scanDns } from "./dns-scan.service";
+import { sendTestEmail, TestEmailError } from "./test-email.service";
+import {
+  getComponentLogs,
+  restartAllComponents,
+  runComponentAction,
+  UnknownComponentError,
+  type ComponentAction,
+} from "./components.service";
+import {
+  acknowledgeDomainDns,
+  getDomainDnsState,
+  listPendingDomainDns,
+} from "./domain-dns.service";
 
 function localOnlyGuard(c: Context): Response | null {
   if (env.CLOUD_MODE) {
@@ -89,14 +102,14 @@ export async function createDomainHandler(c: Context) {
   const serverId = requireServerId(c);
   const body = await c.req.json().catch(() => ({}));
   try {
-    const row = await createDomain(serverId, {
+    const { row, dnsWarning } = await createDomain(serverId, {
       domain: String(body.domain ?? ""),
       description: body.description ? String(body.description) : undefined,
       maxMailboxes: body.maxMailboxes != null ? Number(body.maxMailboxes) : undefined,
       maxAliases: body.maxAliases != null ? Number(body.maxAliases) : undefined,
       defaultQuotaMB: body.defaultQuotaMB != null ? Number(body.defaultQuotaMB) : undefined,
     });
-    return c.json({ domain: row }, 201);
+    return c.json({ domain: row, dnsWarning }, 201);
   } catch (err) {
     if (err instanceof DomainExistsError) {
       return c.json({ error: err.message }, 409);
@@ -135,8 +148,9 @@ export async function deleteDomainHandler(c: Context) {
   const serverId = requireServerId(c);
   const domain = c.req.param("domain");
   if (!domain) return c.json({ error: "domain required" }, 400);
+  const cascade = c.req.query("cascade") === "true";
   try {
-    await deleteDomain(serverId, domain);
+    await deleteDomain(serverId, domain, { cascade });
     return c.json({ ok: true });
   } catch (err) {
     if (err instanceof DomainHasDependentsError) {
@@ -145,6 +159,71 @@ export async function deleteDomainHandler(c: Context) {
         409,
       );
     }
+    return errorJson(c, err);
+  }
+}
+
+// ─── Per-domain DNS (additional domains) ─────────────────────────────────────
+
+/**
+ * GET the DNS state for one domain. Returns 404 when no DNS records have
+ * been generated for it (which is the case for the primary install
+ * domain — its records live under /mail/status as the install-time
+ * `dnsRecords`, not here).
+ */
+export async function getDomainDnsHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  const domain = c.req.param("domain");
+  if (!domain) return c.json({ error: "domain required" }, 400);
+  try {
+    const state = await getDomainDnsState(serverId, domain.toLowerCase());
+    if (!state) {
+      return c.json({ error: "No DNS state for this domain" }, 404);
+    }
+    return c.json({ domain: domain.toLowerCase(), ...state });
+  } catch (err) {
+    return errorJson(c, err);
+  }
+}
+
+/**
+ * POST acknowledgement: operator confirmed they published the records.
+ * Flips `acknowledgedAt` to now; the Domains tab stops rendering the
+ * banner for this domain on the next reload.
+ */
+export async function acknowledgeDomainDnsHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  const domain = c.req.param("domain");
+  if (!domain) return c.json({ error: "domain required" }, 400);
+  try {
+    await acknowledgeDomainDns(serverId, domain.toLowerCase());
+    return c.json({ ok: true });
+  } catch (err) {
+    return errorJson(c, err);
+  }
+}
+
+/**
+ * GET every additional domain whose DNS publication is still pending
+ * (acknowledgedAt == null). Lets the Domains tab render a stack of
+ * banners in one round-trip instead of per-row.
+ */
+export async function pendingDomainDnsHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  try {
+    const pending = await listPendingDomainDns(serverId);
+    // Flatten { domain, state } → { domain, ...state } so the shape matches
+    // the dashboard's `AdditionalDomainDnsState` type.
+    return c.json({
+      pending: pending.map(({ domain, state }) => ({ domain, ...state })),
+    });
+  } catch (err) {
     return errorJson(c, err);
   }
 }
@@ -277,6 +356,26 @@ export async function getStatsHandler(c: Context) {
   }
 }
 
+// ─── Test email ──────────────────────────────────────────────────────────────
+
+export async function sendTestEmailHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    const result = await sendTestEmail(serverId, {
+      to: String(body.to ?? ""),
+    });
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof TestEmailError) {
+      return c.json({ error: err.message }, 400);
+    }
+    return errorJson(c, err);
+  }
+}
+
 // ─── DNS health scan ─────────────────────────────────────────────────────────
 
 export async function getDnsScanHandler(c: Context) {
@@ -287,6 +386,58 @@ export async function getDnsScanHandler(c: Context) {
     const result = await scanDns(serverId);
     return c.json(result);
   } catch (err) {
+    return errorJson(c, err);
+  }
+}
+
+// ─── Component actions (Health tab) ──────────────────────────────────────────
+
+export async function runComponentActionHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  const key = c.req.param("key");
+  if (!key) return c.json({ error: "key is required" }, 400);
+  const action = c.req.param("action") as ComponentAction | undefined;
+  if (!action) return c.json({ error: "action is required" }, 400);
+  try {
+    const result = await runComponentAction(serverId, key, action);
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof UnknownComponentError) {
+      return c.json({ error: err.message }, 400);
+    }
+    return errorJson(c, err);
+  }
+}
+
+export async function restartAllComponentsHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  try {
+    const result = await restartAllComponents(serverId);
+    return c.json(result);
+  } catch (err) {
+    return errorJson(c, err);
+  }
+}
+
+export async function getComponentLogsHandler(c: Context) {
+  const guard = localOnlyGuard(c);
+  if (guard) return guard;
+  const serverId = requireServerId(c);
+  const key = c.req.param("key");
+  if (!key) return c.json({ error: "key is required" }, 400);
+  const linesParam = c.req.query("lines");
+  const requested = linesParam ? Number(linesParam) : undefined;
+  try {
+    const result = await getComponentLogs(serverId, key, requested);
+    return c.json(result);
+  } catch (err) {
+    if (err instanceof UnknownComponentError) {
+      return c.json({ error: err.message }, 400);
+    }
     return errorJson(c, err);
   }
 }

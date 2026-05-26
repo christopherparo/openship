@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Inbox } from "lucide-react";
 import { useProjectSettings } from "@/context/ProjectSettingsContext";
 import { EnvironmentSettings } from "./EnvironmentSettings";
 import { projectsApi } from "@/lib/api";
@@ -8,6 +8,7 @@ import BuildSettingsComponent from "@/components/import-project/BuildSettings";
 
 export const BuildSettings = () => {
   const { buildData, updateBuild, projectData, id } = useProjectSettings();
+  const isWebmail = projectData?.framework === "webmail";
 
   const [showEnvironment, setShowEnvironment] = useState(false);
 
@@ -46,19 +47,39 @@ export const BuildSettings = () => {
 
   return (
     <div className="max-w-5xl space-y-6">
-        <BuildSettingsComponent
-          mode="advanced"
-          buildData={buildData}
-          buildConfig={{
-            options: buildData,
-            buildImage: buildData.buildImage,
-            updateOptions: updateBuild,
-            framework: projectData?.framework,
-            packageManager: projectData?.packageManager,
-          }}
-          onSave={handleSaveField}
-          loading={loading}
-        />
+        {isWebmail ? (
+          <div className="bg-card rounded-2xl border border-border/50 p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-muted/50 border border-border/50 flex items-center justify-center shrink-0">
+                <Inbox className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-lg font-semibold text-foreground mb-1">
+                  Managed by openship
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Webmail uses a fixed build and start pipeline. Install,
+                  build, and run commands are not configurable — redeploy from
+                  the mail overview to pick up upstream changes.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <BuildSettingsComponent
+            mode="advanced"
+            buildData={buildData}
+            buildConfig={{
+              options: buildData,
+              buildImage: buildData.buildImage,
+              updateOptions: updateBuild,
+              framework: projectData?.framework,
+              packageManager: projectData?.packageManager,
+            }}
+            onSave={handleSaveField}
+            loading={loading}
+          />
+        )}
 
         {/* <ServerSideSwitch
           style={{ background: '#fafafa' }}

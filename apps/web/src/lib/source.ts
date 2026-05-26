@@ -20,3 +20,10 @@ export interface ResourceFrontmatter {
   body: React.ComponentType;
   _exports?: { raw?: string };
 }
+
+export interface DocFrontmatter {
+  title: string;
+  description?: string;
+  body: React.ComponentType;
+  toc: unknown;
+}

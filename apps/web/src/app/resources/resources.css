@@ -9,64 +9,11 @@
   min-height: 100vh;
 }
 
-/* ── Sticky header ── */
-.res-header {
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  background: color-mix(in srgb, var(--th-bg-page) 80%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--th-bd-subtle);
-}
-.res-header-inner {
-  margin: 0 auto;
-  max-width: 1120px;
-  padding: 14px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.res-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--th-text-heading);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.res-brand-mark {
-  display: inline-block;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 2.4px solid currentColor;
-}
-.res-nav {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-}
-.res-nav a {
-  font-size: 14px;
-  color: var(--th-text-muted);
-  transition: color .2s ease;
-}
-.res-nav a:hover { color: var(--th-text-heading); }
-.res-nav a[data-active="true"] { color: var(--th-text-heading); }
-.res-nav-gh {
-  color: var(--th-text-muted);
-  transition: color .2s ease;
-}
-.res-nav-gh:hover { color: var(--th-text-heading); }
-.res-nav-gh svg { width: 18px; height: 18px; }
-
 /* ── Page container ── */
 .res-main {
   margin: 0 auto;
   max-width: 1120px;
-  padding: clamp(56px, 8vw, 96px) 24px clamp(80px, 10vw, 140px);
+  padding: clamp(112px, 12vw, 160px) 24px clamp(80px, 10vw, 140px);
 }
 
 /* ── Hero ── */
@@ -310,7 +257,7 @@
 .res-post-inner {
   margin: 0 auto;
   max-width: 1200px;
-  padding: clamp(48px, 6vw, 88px) 24px clamp(80px, 10vw, 120px);
+  padding: clamp(112px, 11vw, 160px) 24px clamp(80px, 10vw, 120px);
 }
 .rp-body-wrap {
   display: grid;

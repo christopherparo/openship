@@ -11,7 +11,15 @@
  * authoritative `mailbox` / `forwardings` tables.
  */
 
+import { sshManager } from "../../../lib/ssh-manager";
+import { readState } from "../mail-state";
+import { provisionDomainDkim } from "../mail.service";
 import { execute, queryOne, queryRows, q, qInt } from "./psql-runner";
+import {
+  buildDomainDnsRecords,
+  recordDomainDns,
+  deleteDomainDns,
+} from "./domain-dns.service";
 
 const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/i;
 
@@ -99,7 +107,7 @@ export async function getDomain(
 export async function createDomain(
   serverId: string,
   input: CreateDomainInput,
-): Promise<DomainRow> {
+): Promise<{ row: DomainRow; dnsWarning?: string }> {
   validateDomain(input.domain);
   const domain = input.domain.toLowerCase();
 
@@ -126,9 +134,62 @@ export async function createDomain(
       )`,
   );
 
+  // After the SQL insert succeeds, provision DKIM for the new domain
+  // (amavis keypair + 50-user config splice + reload), then record the
+  // MX/SPF/DKIM/DMARC bundle the operator needs to publish at their DNS
+  // provider. Postfix already accepts mail for the new domain — these
+  // records are about external senders finding the MX target and passing
+  // SPF/DKIM/DMARC alignment.
+  //
+  // The `mail.<installDomain>` MX target is the only hostname with an SSL
+  // cert + iRedMail config, so every additional domain shares it.
+  //
+  // DKIM provisioning is best-effort: if it fails, we still record the
+  // MX/SPF/DMARC banner so the operator can publish those, and the
+  // dnsWarning toast tells them what to fix.
+  let dnsWarning: string | undefined;
+  try {
+    const { installDomain, dkimValue, dkimError } = await sshManager.withExecutor(
+      serverId,
+      async (exec) => {
+        const state = await readState(exec);
+        const installDomain = state?.domain ?? null;
+        if (!installDomain) {
+          return { installDomain: null, dkimValue: undefined, dkimError: undefined };
+        }
+        try {
+          const dkimValue = await provisionDomainDkim(exec, domain);
+          return { installDomain, dkimValue, dkimError: undefined };
+        } catch (err) {
+          return {
+            installDomain,
+            dkimValue: undefined,
+            dkimError: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
+    );
+    if (!installDomain) {
+      dnsWarning =
+        "Mail state file is missing the primary install domain — DNS records for the new domain were not generated. Re-run the mail install or contact support.";
+    } else {
+      const records = buildDomainDnsRecords(installDomain, domain, dkimValue);
+      await recordDomainDns(serverId, domain, records);
+      if (dkimError) {
+        dnsWarning = `Domain added, but DKIM provisioning failed: ${dkimError}. MX/SPF/DMARC records are still in the banner — DKIM can be added later.`;
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `createDomain: DNS record persistence failed for ${domain}: ${message}`,
+    );
+    dnsWarning = `DNS record persistence failed for ${domain}: ${message}`;
+  }
+
   const row = await getDomain(serverId, domain);
   if (!row) throw new Error(`createDomain: row not found after INSERT for ${domain}`);
-  return row;
+  return { row, dnsWarning };
 }
 
 export async function updateDomain(
@@ -193,20 +254,54 @@ export async function countDomainDependents(
 }
 
 /**
- * Delete a domain. Refuses if any mailboxes or aliases still exist for it
- * (caller should empty those first). Removes the row + any `domain_admins`
- * mappings.
+ * Delete a domain. Without `cascade`, refuses when mailboxes/aliases still
+ * exist (caller should empty those first). With `cascade=true`, wipes every
+ * mailbox (DB rows + Maildirs on disk) and every alias under the domain
+ * before removing the domain row + `domain_admins` mappings.
  */
 export async function deleteDomain(
   serverId: string,
   domain: string,
+  options: { cascade?: boolean } = {},
 ): Promise<void> {
   validateDomain(domain);
   const d = domain.toLowerCase();
 
   const deps = await countDomainDependents(serverId, d);
-  if (deps.mailboxes > 0 || deps.aliases > 0) {
+  if ((deps.mailboxes > 0 || deps.aliases > 0) && !options.cascade) {
     throw new DomainHasDependentsError(d, deps);
+  }
+
+  if (options.cascade && (deps.mailboxes > 0 || deps.aliases > 0)) {
+    // Cascade: hard-delete every mailbox (rows + Maildirs) and every alias
+    // forwarding row for the domain. We lazy-import to avoid a circular
+    // import with mailboxes.service (which imports recountDomain from us).
+    const { listMailboxes, hardDeleteMailbox } = await import("./mailboxes.service");
+    const mailboxes = await listMailboxes(serverId, d);
+    for (const m of mailboxes) {
+      // Postmaster of the install domain can't be hard-deleted, but the
+      // install domain itself can't be dropped while it has a mailbox
+      // anyway. For additional domains, postmaster is a regular mailbox
+      // — we don't carry the install-domain guard here so let the lower
+      // function decide.
+      try {
+        await hardDeleteMailbox(serverId, m.username);
+      } catch (err) {
+        // Surface the first failure: leaving half-deleted state is worse
+        // than aborting the cascade and letting the operator retry.
+        throw new Error(
+          `cascade delete: failed to remove mailbox ${m.username}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+    // Wipe the remaining alias forwarding rows. Mailboxes own a
+    // self-forwarding row that `hardDeleteMailbox` already removed; the
+    // statement below cleans up everything else (is_alias=1, plus any
+    // dangling forwards that pointed into the domain).
+    await execute(
+      serverId,
+      `DELETE FROM forwardings WHERE domain = ${q(d)}`,
+    );
   }
 
   await execute(
@@ -214,6 +309,10 @@ export async function deleteDomain(
     `DELETE FROM domain_admins WHERE domain = ${q(d)};
      DELETE FROM domain WHERE domain = ${q(d)};`,
   );
+
+  // Best-effort: drop any persisted DNS-pending banner state so the
+  // dashboard doesn't keep nagging about a domain that no longer exists.
+  await deleteDomainDns(serverId, d).catch(() => {});
 }
 
 /**

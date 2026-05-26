@@ -45,6 +45,17 @@ export function createProjectRepo(db: Database) {
       });
     },
 
+    /**
+     * Find a project by slug without scoping to a user. Use ONLY for slugs
+     * that are deterministic and globally unique (e.g. `webmail-<serverId>`),
+     * never for user-facing slugs where collisions across users are expected.
+     */
+    async findFirstBySlug(slug: string) {
+      return db.query.project.findFirst({
+        where: and(eq(project.slug, slug), isNull(project.deletedAt)),
+      });
+    },
+
     /** Find all projects linked to a given git owner/repo (for webhook dispatch) */
     async findByGitRepo(owner: string, repo: string) {
       const ownerKey = owner.toLowerCase();

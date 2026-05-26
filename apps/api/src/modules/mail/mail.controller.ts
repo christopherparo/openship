@@ -107,21 +107,35 @@ function statusFromState(state: MailServerState | null, serverId: string) {
     };
   });
 
-  // Surface ONLY the postmaster login. The rest of `state.secrets` is
-  // internal plumbing (Postgres root, vmail DB binds, etc.) — the operator
-  // doesn't need to see those in the dashboard, and shipping them across
-  // the wire just expands the attack surface.
-  const credentials =
-    state.secrets.DOMAIN_ADMIN_PASSWD_PLAIN
-      ? {
-          username: `postmaster@${state.domain}`,
-          password: state.secrets.DOMAIN_ADMIN_PASSWD_PLAIN,
-          smtpHost: `mail.${state.domain}`,
-          smtpPort: 587,
-          imapHost: `mail.${state.domain}`,
-          imapPort: 993,
-        }
-      : undefined;
+  // Surface the postmaster identity + protocol endpoints — but never the
+  // password. The plaintext used to be mirrored back from install for
+  // convenience; that's gone. Operators reset via the Change flow whenever
+  // they need a known password; the SSHA512 hash in vmail.mailbox is the
+  // only source of truth.
+  const credentials = state.domain
+    ? {
+        username: `postmaster@${state.domain}`,
+        smtpHost: `mail.${state.domain}`,
+        smtpPort: 587,
+        imapHost: `mail.${state.domain}`,
+        imapPort: 993,
+      }
+    : undefined;
+
+  // Webmail block — never leak the branding admin token to the dashboard.
+  // The token is the shared secret openship's API uses to PATCH Zero's
+  // /admin/branding endpoint; the operator never needs to see or paste it.
+  const webmail = state.webmail
+    ? {
+        installed: state.webmail.installed,
+        targetServerId: state.webmail.targetServerId,
+        hostname: state.webmail.hostname,
+        url: state.webmail.url,
+        internalPort: state.webmail.internalPort,
+        deployedAt: state.webmail.deployedAt,
+        version: state.webmail.version,
+      }
+    : undefined;
 
   return {
     active: isActive,
@@ -134,6 +148,7 @@ function statusFromState(state: MailServerState | null, serverId: string) {
     dnsAcknowledged: state.dnsAcknowledged,
     ptrAcknowledged: state.ptrAcknowledged ?? false,
     credentials,
+    webmail,
     steps: stepStatuses,
     // Persisted log buffer — capped to MAX_PERSISTED_LOGS lines. Lets the
     // dashboard restore the live-log panel on refresh instead of showing
@@ -222,6 +237,7 @@ export async function getStatus(c: Context) {
     // a hole where the host records should be.
     if (state) {
       state = await augmentStateWithHostRecords(state, serverId);
+      state = await reconcileWebmailInstalled(state, serverId);
     }
     return c.json(statusFromState(state, serverId));
   } catch {
@@ -275,6 +291,41 @@ async function augmentStateWithHostRecords(
   };
 
   return { ...state, dnsRecords: augmented };
+}
+
+/**
+ * Cross-check `state.webmail.installed` against the actual webmail project's
+ * latest deployment. Old state files (or interrupted deploys before this fix)
+ * can have `installed: true` written before the build ever ran. We trust the
+ * project's deployment status as the source of truth: if there's no project
+ * row for `webmail-<serverId>`, or its latest deployment isn't `ready`, the
+ * webmail is not installed — regardless of what the JSON file says.
+ *
+ * Read-time only: we don't write back. If the truth flips later (deploy
+ * succeeds), the onSuccess hook in deployment-lifecycle writes `installed=true`
+ * and we stop overriding it here.
+ */
+async function reconcileWebmailInstalled(
+  state: MailServerState,
+  serverId: string,
+): Promise<MailServerState> {
+  if (!state.webmail?.installed) return state;
+  try {
+    const project = await repos.project.findFirstBySlug(`webmail-${serverId}`);
+    if (!project) {
+      return { ...state, webmail: { ...state.webmail, installed: false } };
+    }
+    if (!project.activeDeploymentId) {
+      return { ...state, webmail: { ...state.webmail, installed: false } };
+    }
+    const dep = await repos.deployment.findById(project.activeDeploymentId);
+    if (dep?.status !== "ready") {
+      return { ...state, webmail: { ...state.webmail, installed: false } };
+    }
+    return state;
+  } catch {
+    return state;
+  }
 }
 
 const IPV4_LITERAL = /^\d{1,3}(?:\.\d{1,3}){3}$/;

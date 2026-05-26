@@ -178,6 +178,13 @@ export interface StackDefinition {
   /** Minimum tool versions required by this stack on bare metal. */
   requiredToolVersions?: Readonly<Record<string, string>>;
   /**
+   * Override the tool list inherited from the language. Use for stacks that
+   * intentionally bypass the language default — e.g. a TypeScript stack that
+   * runs on bun instead of node. When omitted, the language's `requiredTools`
+   * is used.
+   */
+  requiredTools?: readonly string[];
+  /**
    * Files/directories to copy into `/app/production/` after build.
    * Only these paths are needed at runtime — everything else stays in `/app`.
    * Omit for stacks where everything is needed (e.g. docker, static).
@@ -842,6 +849,21 @@ export const STACKS = {
     defaultBuildCommand: "",
     defaultStartCommand: "",
   },
+
+  // ── Opinionated openship installs (commands fixed by the runner) ───────────
+
+  webmail: {
+    name: "Webmail",
+    language: "typescript",
+    category: "fullstack",
+    outputDirectory: "client/build",
+    defaultPort: 4080,
+    defaultBuildCommand: "bun run build",
+    defaultStartCommand: "bun run src/main.ts",
+    // Runs on bun, not node — the toolchain layer installs bun from the catalog.
+    requiredTools: ["bun"],
+    requiredToolVersions: { bun: "1.2.0" },
+  },
 } as const satisfies Record<string, StackDefinition>;
 
 // ─── Derived constants (auto-generated, never edit manually) ─────────────────
@@ -998,6 +1020,9 @@ export const STACK_ICONS: Partial<Record<StackId, string>> = {
 
   // Elixir
   phoenix:     `${DI}/phoenix/phoenix-original.svg`,
+
+  // Opinionated installs
+  webmail:     `${DI}/typescript/typescript-original.svg`,
 
   // Generic
   node:        `${DI}/nodejs/nodejs-original.svg`,

@@ -2,9 +2,7 @@
 
 /**
  * Shared DNS-records grid. Renders the 4 required records (MX/SPF/DKIM/
- * DMARC) plus the 2 forward-looking client-autoconfig CNAMEs
- * (autodiscover/autoconfig) — synthesizing the latter from the domain if
- * the on-server state file doesn't carry them yet.
+ * DMARC) plus optional A/AAAA host records.
  *
  * Used in two places:
  *   - The DKIM hold banner (`/emails` page) while the install is paused.
@@ -36,39 +34,7 @@ export function displayDnsName(fullName: string, domain: string): string {
   return fullName;
 }
 
-/**
- * Fill in any client-autoconfig records the backend didn't provide. The
- * 2 CNAMEs are pure functions of the domain — no DKIM key dependency,
- * no per-install state — so we can synthesize them client-side instead
- * of forcing a reinstall to see them.
- *
- * For older installs whose `state.dnsRecords` only carries the 4 required
- * records. Newer installs include the CNAMEs on the backend; `??` keeps
- * those values verbatim.
- */
-export function augmentDnsRecords(
-  records: DnsRecords,
-  domain: string,
-): DnsRecords {
-  const mailDomain = `mail.${domain}`;
-  return {
-    ...records,
-    autodiscoverCname: records.autodiscoverCname ?? {
-      type: "CNAME",
-      name: `autodiscover.${domain}`,
-      value: mailDomain,
-      required: false,
-    },
-    autoconfigCname: records.autoconfigCname ?? {
-      type: "CNAME",
-      name: `autoconfig.${domain}`,
-      value: mailDomain,
-      required: false,
-    },
-  };
-}
-
-/** Iteration order: host records first, mail-delivery next, client-autoconfig last. */
+/** Iteration order: host records first, mail-delivery records next. */
 export function recordsToList(records: DnsRecords): DnsRecord[] {
   return [
     records.a,
@@ -77,8 +43,6 @@ export function recordsToList(records: DnsRecords): DnsRecord[] {
     records.spf,
     records.dkim,
     records.dmarc,
-    records.autodiscoverCname,
-    records.autoconfigCname,
   ].filter((r): r is DnsRecord => r !== undefined);
 }
 
@@ -93,15 +57,14 @@ interface DnsRecordsViewProps {
 
 /**
  * Self-contained grid of record cards. Drop into any container; takes
- * care of augmentation, iteration, and per-card UI.
+ * care of iteration and per-card UI.
  */
 export function DnsRecordsView({
   records,
   domain,
   columns = 2,
 }: DnsRecordsViewProps) {
-  const full = augmentDnsRecords(records, domain);
-  const rows = recordsToList(full);
+  const rows = recordsToList(records);
   const colsClass = columns === 1 ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2";
   return (
     <div className={`grid ${colsClass} gap-3`}>

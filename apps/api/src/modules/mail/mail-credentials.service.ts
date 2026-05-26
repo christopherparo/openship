@@ -8,13 +8,10 @@
  *      cleartext or the hash through any intermediate process.
  *   2. UPDATE vmail.mailbox SET password = '<hash>' WHERE username = …
  *      via `sudo -u postgres psql`.
- *   3. Mirror the new cleartext into the on-server state file so the
- *      dashboard's Credentials card stays in sync.
- *
- * The state file's cleartext is convenience-only — the source of truth
- * for auth is the hash in `vmail.mailbox`. If the two ever drift (manual
- * SQL update outside openship), Dovecot honours the DB; the dashboard
- * just shows a stale string.
+ *   3. Scrub any leftover plaintext from the state file. We used to mirror
+ *      it back for the credentials card to display; that was a needless
+ *      attack surface and is gone — the only way to "know" the password
+ *      now is to set one via this flow.
  */
 
 import type { CommandExecutor } from "@repo/adapters";
@@ -80,18 +77,12 @@ export async function updatePostmasterPassword(
   const psqlCmd = `sudo -u postgres psql -d vmail -v ON_ERROR_STOP=1 -c "UPDATE mailbox SET password='${hash}' WHERE username='${username}';"`;
   await exec.exec(psqlCmd);
 
-  // Mirror into the state file so the dashboard's Credentials card stays
-  // in sync. Best-effort: if the state file is missing (operator deleted
-  // it manually), we still consider the change successful — the DB is the
-  // source of truth for actual auth.
+  // Scrub plaintext from the state file if it lingered from a pre-purge
+  // install. Best-effort: if the state file is missing, the change is
+  // still successful — the hash in the DB is what matters.
   const state = await readState(exec);
-  if (state) {
-    await writeState(exec, {
-      ...state,
-      secrets: {
-        ...state.secrets,
-        DOMAIN_ADMIN_PASSWD_PLAIN: newPassword,
-      },
-    });
+  if (state && state.secrets.DOMAIN_ADMIN_PASSWD_PLAIN) {
+    const { DOMAIN_ADMIN_PASSWD_PLAIN: _drop, ...secrets } = state.secrets;
+    await writeState(exec, { ...state, secrets });
   }
 }
