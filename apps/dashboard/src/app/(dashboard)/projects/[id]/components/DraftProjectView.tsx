@@ -31,7 +31,6 @@ import {
   Trash2,
   Github,
   FolderCode,
-  AlertTriangle,
   Loader2,
   ListChecks,
   ChevronRight,
@@ -149,57 +148,57 @@ export function DraftProjectView({ onDeleteProject }: DraftProjectViewProps) {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
       {/* ── LEFT COLUMN — status + deploy history ─────────────────── */}
-      <div className="space-y-6 min-w-0">
-        {/* Status hero */}
-        <div className="bg-card rounded-2xl border border-border/50 p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex min-w-0 items-start gap-4">
-              <div className="min-w-0">
-                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
-                  Deployment
-                </p>
-                <h2 className="mt-1 text-lg font-semibold text-foreground">{heading}</h2>
-                <p className="mt-1 max-w-prose text-sm leading-relaxed text-muted-foreground">
-                  {subtext}
-                </p>
+      <div className="space-y-5 min-w-0">
+        {/* Status hero — soft icon, heading, status pill, primary actions.
+            Lighter than a full section card: no divider, no eyebrow. */}
+        <div className="bg-card rounded-2xl border border-border/50 p-5">
+          <div className="flex items-start gap-3.5">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/15">
+              <Rocket className="size-4 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="text-[15px] font-semibold text-foreground">{heading}</h2>
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${meta.badge}`}
+                >
+                  <span className={`size-1.5 rounded-full ${meta.dot}`} />
+                  {meta.label}
+                </span>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{subtext}</p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleDeploy}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  <Rocket className="size-4" />
+                  {hasSource ? "Deploy now" : "Connect a source"}
+                </button>
+                <button
+                  onClick={() => setActiveTab("settings")}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/60 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  <Settings className="size-4" />
+                  Settings
+                </button>
               </div>
             </div>
-            <span
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${meta.badge}`}
-            >
-              <span className={`size-1.5 rounded-full ${meta.dot}`} />
-              {meta.label}
-            </span>
-          </div>
-
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleDeploy}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20"
-            >
-              <Rocket className="size-4" />
-              {hasSource ? "Deploy now" : "Connect a source"}
-            </button>
-            <button
-              onClick={() => setActiveTab("settings")}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              <Settings className="size-4" />
-              Settings
-            </button>
           </div>
         </div>
 
         {/* Deploy attempts — full build history inline; click a row to open
-            that build directly (no detour through the production UI). */}
-        <SectionCard
-          icon={ListChecks}
-          title="Deploy attempts"
-          description="Every build for this project — click one to open it"
-        >
-          {attempts.length > 0 ? (
+            that build directly. Hidden entirely for a pristine draft: the hero
+            already says "not deployed yet", so an empty box is just noise. */}
+        {attempts.length > 0 && (
+          <SectionCard
+            icon={ListChecks}
+            title="Deploy attempts"
+            description="Every build for this project — click one to open it"
+          >
             <div className="-mx-2 space-y-0.5">
               {attempts.map((d) => {
                 const s = (ATTEMPT_STATUSES as string[]).includes(d.status)
@@ -237,22 +236,12 @@ export function DraftProjectView({ onDeleteProject }: DraftProjectViewProps) {
                 );
               })}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-muted ring-1 ring-border/50">
-                <ListChecks className="size-5 text-muted-foreground" />
-              </div>
-              <p className="text-sm font-medium text-foreground">No deploy attempts yet</p>
-              <p className="max-w-xs text-xs text-muted-foreground">
-                Your build history appears here once you deploy — open any attempt to read its logs.
-              </p>
-            </div>
-          )}
-        </SectionCard>
+          </SectionCard>
+        )}
       </div>
 
-      {/* ── RIGHT COLUMN — source + danger zone ───────────────────── */}
-      <div className="space-y-6">
+      {/* ── RIGHT COLUMN — source + delete ────────────────────────── */}
+      <div className="space-y-5">
         <SectionCard
           icon={hasRepoSource ? Github : FolderCode}
           title="Source"
@@ -291,25 +280,18 @@ export function DraftProjectView({ onDeleteProject }: DraftProjectViewProps) {
           )}
         </SectionCard>
 
-        <SectionCard
-          icon={AlertTriangle}
-          title="Danger zone"
-          description="Irreversible actions"
-          tone="danger"
-        >
+        {/* Delete — de-emphasized. A quiet muted trigger (nothing is
+            provisioned for a draft), escalating to a red confirm only when the
+            user opts in. No permanent red card competing with the deploy CTA. */}
+        <SectionCard icon={Trash2} title="Delete project" description="Remove this project — can't be undone">
           {!confirmOpen ? (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Delete this project. This can&apos;t be undone.
-              </p>
-              <button
-                onClick={() => setConfirmOpen(true)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400"
-              >
-                <Trash2 className="size-4" />
-                Delete project
-              </button>
-            </div>
+            <button
+              onClick={() => setConfirmOpen(true)}
+              className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-red-600 dark:hover:text-red-400"
+            >
+              <Trash2 className="size-4" />
+              Delete project
+            </button>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-foreground">
@@ -342,41 +324,32 @@ export function DraftProjectView({ onDeleteProject }: DraftProjectViewProps) {
 
 /* ── Themed building blocks ─────────────────────────────────────── */
 
+// Lighter section card: inline icon + title (no ring box, no heavy divider),
+// content flush below. Reads calmer than a bordered-header card.
 function SectionCard({
   icon: Icon,
   title,
   description,
   action,
-  tone = "default",
   children,
 }: {
   icon: ComponentType<{ className?: string }>;
   title: string;
   description?: string;
   action?: React.ReactNode;
-  tone?: "default" | "danger";
   children: React.ReactNode;
 }) {
-  const danger = tone === "danger";
   return (
-    <div
-      className={`bg-card rounded-2xl border ${danger ? "border-red-500/20" : "border-border/50"}`}
-    >
-      <div className="flex items-start gap-3 border-b border-border/40 px-5 py-4">
-        <div
-          className={`flex size-9 shrink-0 items-center justify-center rounded-xl ring-1 ${
-            danger ? "bg-red-500/10 ring-red-500/15" : "bg-muted ring-border/50"
-          }`}
-        >
-          <Icon className={`size-4 ${danger ? "text-red-500" : "text-muted-foreground"}`} />
-        </div>
+    <div className="bg-card rounded-2xl border border-border/50 p-5">
+      <div className="mb-4 flex items-start gap-2.5">
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
-          {description && <p className="mt-0.5 text-[12px] text-muted-foreground">{description}</p>}
+          <h3 className="text-[14px] font-semibold leading-none text-foreground">{title}</h3>
+          {description && <p className="mt-1.5 text-[12px] text-muted-foreground">{description}</p>}
         </div>
         {action}
       </div>
-      <div className="px-5 py-4">{children}</div>
+      {children}
     </div>
   );
 }

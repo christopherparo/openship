@@ -454,7 +454,7 @@ const ProjectSettingsContent = () => {
   // Project shell waits for project info specifically (not analytics).
   // Analytics is per-card now; the page-level gate is about whether we
   // know enough about the project to even render its tabs.
-  const { isLoading: isLoadingProjectInfo } = useProjectInfo(id);
+  const { isLoading: isLoadingProjectInfo, error: projectInfoError } = useProjectInfo(id);
 
   const { showToast } = useToast();
   const router = useRouter();
@@ -673,7 +673,15 @@ const ProjectSettingsContent = () => {
     return <ErrorState type={errorType || "project-not-found"} />;
   }
 
-  if (isLoadingProjectInfo) {
+  // `projectData` (context state) is re-seeded from the fetch one tick AFTER
+  // isLoadingProjectInfo flips false (via an effect in the provider). During
+  // that lag it's still the empty seed (id: "") whose derived status is
+  // "draft" — rendering it would flash the DraftProjectView for a frame before
+  // the real project lands. Treat "data hasn't caught up to this id yet" as
+  // still-loading. The `!projectInfoError` guard avoids an infinite skeleton
+  // when the fetch genuinely failed (non-404) and the seed will never arrive.
+  const projectDataReady = projectData.id === id;
+  if (isLoadingProjectInfo || (!projectDataReady && !projectInfoError)) {
     // Mirror the post-load shell (header + two-column grid) so the
     // page doesn't jump when data lands. The right column gets its
     // own placeholder card to reserve the 340px track.
@@ -739,9 +747,15 @@ const ProjectSettingsContent = () => {
   // get a focused screen instead of the analytics dashboard, which would
   // otherwise render empty. In-flight first builds (queued/building/
   // deploying) and live projects fall through to the normal layout.
-  const isNeverDeployed = ["draft", "failed", "cancelled"].includes(
-    getProjectStatus(projectData),
-  );
+  const status = getProjectStatus(projectData);
+  const isNeverDeployed =
+    ["draft", "failed", "cancelled"].includes(status) ||
+    // A draft mid-delete: the optimistic `deletedAt` masks the draft status
+    // as "deleting". Keep the focused draft screen (its own delete spinner
+    // handles the pending state) instead of flipping to the analytics
+    // dashboard for the duration of the teardown. A never-deployed project
+    // has no activeDeploymentId — that's the discriminator vs. a live delete.
+    (status === "deleting" && !projectData.activeDeploymentId);
   if (isNeverDeployed && activeTab === "overview") {
     return (
       <PageContainer>
