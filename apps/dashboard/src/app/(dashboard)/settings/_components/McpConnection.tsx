@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Boxes, Copy, Check, ShieldCheck, Unplug, Loader2 } from "lucide-react";
+import { Boxes, Copy, Check, ShieldCheck, Unplug, Loader2, ChevronDown } from "lucide-react";
 import { SettingsSection } from "./SettingsSection";
 import { getRestApiBaseUrl } from "@/lib/api/urls";
 import { tokensApi, getApiErrorMessage, type McpClient } from "@/lib/api";
@@ -66,6 +66,8 @@ function CopyBlock({ value }: { value: string }) {
 }
 
 export function McpConnection() {
+  const { showToast } = useToast();
+
   // Resolve on the client — getRestApiBaseUrl reads window.location, so compute
   // after mount to avoid an SSR/hydration mismatch.
   const [endpoint, setEndpoint] = useState("");
@@ -73,82 +75,14 @@ export function McpConnection() {
     setEndpoint(`${getRestApiBaseUrl()}/mcp`);
   }, []);
 
-  const configSnippet = [
-    "{",
-    '  "mcpServers": {',
-    '    "openship": {',
-    `      "url": "${endpoint || "https://<your-openship>/api/mcp"}",`,
-    '      "headers": { "Authorization": "Bearer opsh_pat_…" }',
-    "    }",
-    "  }",
-    "}",
-  ].join("\n");
-
-  return (
-    <SettingsSection
-      icon={Boxes}
-      title="MCP"
-      description="Connect AI agents to your Openship API over the Model Context Protocol."
-      iconBg="bg-emerald-500/10"
-      iconColor="text-emerald-500"
-    >
-      <div className="space-y-4">
-        {/* OAuth is the primary path: the client discovers + authorizes itself. */}
-        <div className="flex gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3">
-          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-          <div className="text-xs leading-relaxed text-muted-foreground">
-            <span className="font-medium text-foreground">Paste the endpoint below into your MCP client</span>{" "}
-            (Claude, Cursor, …) — it opens a browser window where you approve access and choose what the client can
-            reach. No token to copy. Openship is a standards-compliant OAuth 2.1 MCP server.
-          </div>
-        </div>
-
-        <div>
-          <p className="mb-1.5 text-xs font-medium text-foreground">Endpoint</p>
-          <CopyRow value={endpoint} />
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Streamable-HTTP JSON-RPC. OAuth-capable clients authorize in the browser; on approval you pick
-            read-only + which resources the client may access.
-          </p>
-        </div>
-
-        <ConnectedClients />
-
-        <div>
-          <p className="mb-1.5 text-xs font-medium text-foreground">Without OAuth (static token)</p>
-          <CopyBlock value={configSnippet} />
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            For clients that don&apos;t support OAuth — or for a fixed, scoped token — create one in the{" "}
-            <Link
-              href="/settings?tab=tokens"
-              className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
-            >
-              Tokens
-            </Link>{" "}
-            tab and replace <code className="font-mono">opsh_pat_…</code>. A read-only token limits the agent to reads.
-          </p>
-        </div>
-      </div>
-    </SettingsSection>
-  );
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-/**
- * Connected MCP clients (OAuth bindings) with a disconnect action. Rendered
- * only when at least one client is connected; disconnect revokes the client's
- * tokens server-side so it can no longer call the API.
- */
-function ConnectedClients() {
-  const { showToast } = useToast();
+  // Connected clients own the layout: once anything is connected the list leads
+  // and the how-to collapses behind "Connect another client". Fetch lives here
+  // (not in a child) so the list + guide render in one coherent pass — no
+  // expanded-then-collapse flash for users who do have connections.
   const [clients, setClients] = useState<McpClient[] | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,17 +109,139 @@ function ConnectedClients() {
     }
   };
 
-  // While loading, show a slim placeholder; once loaded with nothing connected,
-  // render nothing (the endpoint block above already explains how to connect).
-  if (clients === null) {
-    return (
-      <div className="flex items-center gap-2 rounded-xl border border-border/50 px-4 py-3 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" /> Loading connected clients…
-      </div>
-    );
-  }
-  if (clients.length === 0) return null;
+  const hasClients = (clients?.length ?? 0) > 0;
 
+  const configSnippet = [
+    "{",
+    '  "mcpServers": {',
+    '    "openship": {',
+    `      "url": "${endpoint || "https://<your-openship>/api/mcp"}",`,
+    '      "headers": { "Authorization": "Bearer opsh_pat_…" }',
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+
+  return (
+    <SettingsSection
+      icon={Boxes}
+      title="MCP"
+      description="Connect AI agents to your Openship API over the Model Context Protocol."
+      iconBg="bg-emerald-500/10"
+      iconColor="text-emerald-500"
+    >
+      <div className="space-y-4">
+        {clients === null ? (
+          <div className="flex items-center gap-2 rounded-xl border border-border/50 px-4 py-3 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> Loading…
+          </div>
+        ) : hasClients ? (
+          <>
+            <ClientsList
+              clients={clients}
+              confirmId={confirmId}
+              setConfirmId={setConfirmId}
+              disconnecting={disconnecting}
+              onDisconnect={disconnect}
+            />
+
+            {/* Once something is connected, the how-to collapses out of the way. */}
+            <div className="rounded-xl border border-border/50">
+              <button
+                type="button"
+                onClick={() => setGuideOpen((o) => !o)}
+                className="flex w-full items-center justify-between gap-2 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/20"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <ShieldCheck className="size-4 text-emerald-500" />
+                  Connect another client
+                </span>
+                <ChevronDown
+                  className={`size-4 text-muted-foreground transition-transform ${guideOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {guideOpen && (
+                <div className="space-y-4 border-t border-border/40 px-4 py-4">
+                  <GuideBody endpoint={endpoint} configSnippet={configSnippet} />
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Nothing connected yet — lead with the how-to + explainer banner. */}
+            <div className="flex gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+              <div className="text-xs leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">Paste the endpoint below into your MCP client</span>{" "}
+                (Claude, Cursor, …) — it opens a browser window where you approve access and choose what the client
+                can reach. No token to copy. Openship is a standards-compliant OAuth 2.1 MCP server.
+              </div>
+            </div>
+            <GuideBody endpoint={endpoint} configSnippet={configSnippet} />
+          </>
+        )}
+      </div>
+    </SettingsSection>
+  );
+}
+
+/** The connection how-to: endpoint + static-token fallback. Shared by the
+ *  onboarding (nothing connected) and the collapsible "connect another" paths. */
+function GuideBody({ endpoint, configSnippet }: { endpoint: string; configSnippet: string }) {
+  return (
+    <>
+      <div>
+        <p className="mb-1.5 text-xs font-medium text-foreground">Endpoint</p>
+        <CopyRow value={endpoint} />
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Streamable-HTTP JSON-RPC. OAuth-capable clients authorize in the browser; on approval you pick
+          read-only + which resources the client may access.
+        </p>
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-xs font-medium text-foreground">Without OAuth (static token)</p>
+        <CopyBlock value={configSnippet} />
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          For clients that don&apos;t support OAuth — or for a fixed, scoped token — create one in the{" "}
+          <Link
+            href="/settings?tab=tokens"
+            className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
+          >
+            Tokens
+          </Link>{" "}
+          tab and replace <code className="font-mono">opsh_pat_…</code>. A read-only token limits the agent to reads.
+        </p>
+      </div>
+    </>
+  );
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/**
+ * Presentational list of connected MCP clients (OAuth bindings) with a
+ * two-step disconnect. State lives in the parent so the list + how-to render
+ * coherently. Disconnect revokes the client's tokens server-side.
+ */
+function ClientsList({
+  clients,
+  confirmId,
+  setConfirmId,
+  disconnecting,
+  onDisconnect,
+}: {
+  clients: McpClient[];
+  confirmId: string | null;
+  setConfirmId: (id: string | null) => void;
+  disconnecting: string | null;
+  onDisconnect: (clientId: string) => void;
+}) {
   return (
     <div>
       <p className="mb-1.5 text-xs font-medium text-foreground">Connected clients</p>
@@ -230,7 +286,7 @@ function ConnectedClients() {
                     Cancel
                   </button>
                   <button
-                    onClick={() => disconnect(id)}
+                    onClick={() => onDisconnect(id)}
                     disabled={busy || !id}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
                   >
