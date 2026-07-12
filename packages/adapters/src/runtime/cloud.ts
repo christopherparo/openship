@@ -1030,9 +1030,6 @@ export class CloudRuntime implements MultiServiceRuntimeAdapter {
           `cp -a ${sq(`${contextSource}/.`)} ${sq(contextRoot)}/`,
         ]
       : ['echo "Using repository root as Dockerfile context."'];
-    const excludedPaths = TRANSFER_EXCLUDES.map((path) =>
-      `rm -rf ${sq(joinWorkspacePath(contextRoot, path))}`,
-    );
     const cloneCommand = [
       "set -e",
       `rm -rf ${sq(repoRoot)} ${sq(contextRoot)}`,
@@ -1045,12 +1042,14 @@ export class CloudRuntime implements MultiServiceRuntimeAdapter {
     const checkoutCommand = config.commitSha
       ? `cd ${sq(cloneTarget)} && git -c credential.helper= -c advice.detachedHead=false checkout ${sq(config.commitSha)}`
       : "";
+    // No name-based pruning: a fresh clone already contains only git-tracked
+    // files (gitignored output was never committed), so pruning by name here
+    // would only risk deleting tracked source (e.g. a top-level `data/` dir).
+    // A tracked `.dockerignore` still applies at `docker build` on the worker.
     const prepareCommand = [
       "set -e",
       `rm -rf ${sq(joinWorkspacePath(cloneTarget, ".git"))}`,
       ...prepareContextCommands,
-      'echo "Pruning Dockerfile context..."',
-      ...excludedPaths,
       'echo "Dockerfile context prepared."',
     ].join("\n");
 

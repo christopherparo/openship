@@ -3,7 +3,7 @@ import { mkdtemp, rm as fsRm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { getTarCreateArgs } from "../archive";
+import { prepareSourceTarArgs } from "../archive";
 import type {
   CommandExecutor,
   LogEntry,
@@ -495,7 +495,10 @@ export class SshExecutor implements CommandExecutor {
     // ssh2 SFTP, made stall-proof + resumable on our side.
     const deps = { config: this.config, hasRemoteCommand: (c: string) => this.hasRemoteCommand(c) };
     const excludes = options?.excludes ?? [...TRANSFER_EXCLUDES];
-    const tarArgs = getTarCreateArgs(localPath, { excludes, includes: options?.includes });
+    const { args: tarArgs, cleanup: cleanupTarList } = await prepareSourceTarArgs(localPath, {
+      excludes,
+      includes: options?.includes,
+    });
     const tmpLocalDir = await mkdtemp(join(tmpdir(), "openship-xfer-"));
     const localArchive = join(tmpLocalDir, "context.tar.gz");
     // Sibling of the destination dir so it lands on the same filesystem.
@@ -520,6 +523,7 @@ export class SshExecutor implements CommandExecutor {
 
       await extractRemoteArchive((command) => this.exec(command), remoteArchive, remotePath, totalBytes, onLog);
     } finally {
+      await cleanupTarList().catch(() => {});
       await fsRm(tmpLocalDir, { recursive: true, force: true }).catch(() => {});
     }
   }

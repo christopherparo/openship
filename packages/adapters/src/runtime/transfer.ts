@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import type { WorkspaceHandle } from "oblien";
 
 import { TRANSFER_EXCLUDES, safeErrorMessage } from "@repo/core";
-import { getTarCreateArgs, getTarCreateEnv } from "../archive";
+import { getTarCreateEnv, prepareSourceTarArgs } from "../archive";
 import type { CommandExecutor } from "../types";
 import { BuildLogger, sq } from "./build-pipeline";
 
@@ -94,29 +94,33 @@ async function createTarball(
   localPath: string,
   options?: DirectoryTransferOptions,
 ): Promise<Buffer> {
-  const args = getTarCreateArgs(localPath, {
+  const { args, cleanup } = await prepareSourceTarArgs(localPath, {
     excludes: options?.excludes ?? [...TRANSFER_EXCLUDES],
     includes: options?.includes,
   });
 
-  return new Promise((resolve, reject) => {
-    execFile(
-      "tar",
-      args,
-      {
-        encoding: "buffer",
-        maxBuffer: TAR_MAX_BUFFER,
-        env: getTarCreateEnv(),
-      },
-      (err, stdout, stderr) => {
-        if (err) {
-          const stderrText = Buffer.isBuffer(stderr) ? stderr.toString().trim() : String(stderr ?? "").trim();
-          reject(new Error(stderrText || err.message));
-          return;
-        }
+  try {
+    return await new Promise((resolve, reject) => {
+      execFile(
+        "tar",
+        args,
+        {
+          encoding: "buffer",
+          maxBuffer: TAR_MAX_BUFFER,
+          env: getTarCreateEnv(),
+        },
+        (err, stdout, stderr) => {
+          if (err) {
+            const stderrText = Buffer.isBuffer(stderr) ? stderr.toString().trim() : String(stderr ?? "").trim();
+            reject(new Error(stderrText || err.message));
+            return;
+          }
 
-        resolve(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout));
-      },
-    );
-  });
+          resolve(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout));
+        },
+      );
+    });
+  } finally {
+    await cleanup();
+  }
 }

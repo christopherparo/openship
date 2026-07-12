@@ -1,21 +1,13 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { access, cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 
 import ignore from "ignore";
 
-import {
-  PACKAGE_ROOT_ONLY_EXCLUDES,
-  STACKS,
-  TRANSFER_EXCLUDES,
-  type StackDefinition,
-  type StackId,
-} from "@repo/core";
-
 import type { BuildConfig, LogCallback } from "../types";
 
+import { getTarCreateEnv, prepareSourceTarArgs } from "../archive";
 import { injectGitToken } from "./build-pipeline";
 import { generateDockerfile } from "./docker-build-plan";
 import { resolveDockerfileCandidates, resolveDockerRootDirectory } from "./docker-paths";
@@ -118,86 +110,76 @@ const GENERATED_DOCKERFILE_NAME = "Dockerfile.openship";
 
 type IgnoreMatcher = ReturnType<typeof ignore>;
 
-function getDockerContextExcludes(config: BuildConfig): Set<string> {
-  const stack = STACKS[config.stack as StackId] as StackDefinition | undefined;
-  return new Set([...TRANSFER_EXCLUDES, ...(stack?.cacheDirs ?? [])]);
-}
-
-const PACKAGE_ROOT_ONLY = new Set<string>(PACKAGE_ROOT_ONLY_EXCLUDES);
-
 function toPosixPath(value: string): string {
   return value.split(sep).filter(Boolean).join("/");
 }
 
 /**
- * Whether one directory/file entry should be pruned from the build context.
- * Unambiguous artifact/dep/VCS names (node_modules, .git, .next, …) match at any
- * depth. The ambiguous output names (build/dist/data) double as source-folder
- * names, so they are pruned ONLY when the entry sits at a package root (beside a
- * package.json) — a genuine build output — never when nested in the source tree
- * (e.g. a Next.js `app/.../build` route). A .gitignore/.dockerignore rule always applies.
- * Both callers walk top-down and skip a pruned dir's contents, so checking the
- * leaf entry is sufficient.
+ * `.dockerignore` matcher for the build context. `.gitignore` is deliberately
+ * NOT read here — the base tree is already git-truth (local: `git ls-files`;
+ * clone: a clean checkout), so gitignored output was never included. We only
+ * layer the docker-specific `.dockerignore` on top (dockerode tars the context
+ * as-is and does not honour it itself). Returns undefined when absent.
  */
-function isExcludedEntry(
-  entryName: string,
-  parentAbsPath: string,
-  relativePath: string,
-  excludes: Set<string>,
-  ignoreMatcher?: IgnoreMatcher,
-): boolean {
-  if (excludes.has(entryName)) {
-    if (!PACKAGE_ROOT_ONLY.has(entryName) || existsSync(join(parentAbsPath, "package.json"))) {
-      return true;
-    }
+async function loadDockerignoreMatcher(rootPath: string): Promise<IgnoreMatcher | undefined> {
+  try {
+    return ignore().add(await readFile(join(rootPath, ".dockerignore"), "utf-8"));
+  } catch {
+    return undefined; // no .dockerignore
   }
-  return ignoreMatcher?.ignores(toPosixPath(relativePath)) ?? false;
+}
+
+/** Remove everything matching `.dockerignore` from an already-materialized
+ *  context tree. No-op when the repo has no `.dockerignore`. */
+async function applyDockerignore(contextDir: string): Promise<void> {
+  const matcher = await loadDockerignoreMatcher(contextDir);
+  if (!matcher) return;
+
+  const prune = async (currentPath: string): Promise<void> => {
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    await Promise.all(
+      entries.map(async (entry) => {
+        const absolutePath = join(currentPath, entry.name);
+        const relativePath = relative(contextDir, absolutePath);
+        if (matcher.ignores(toPosixPath(relativePath))) {
+          await rm(absolutePath, { recursive: true, force: true });
+          return;
+        }
+        if (entry.isDirectory()) await prune(absolutePath);
+      }),
+    );
+  };
+  await prune(contextDir);
 }
 
 /**
- * Build an ignore matcher from the source's own ignore files. `.gitignore` is
- * the primary source of truth (git already knows source-vs-generated); a
- * `.dockerignore` layers on top afterward so its docker-specific rules /
- * negations win. Both use gitignore glob semantics via the `ignore` package.
- * Returns undefined when neither file exists.
+ * Materialize a local source dir into the build context as EXACTLY what git
+ * ships (tracked + untracked-not-ignored), via the shared `prepareSourceTarArgs`
+ * resolver — the same single source of truth the SSH transfer paths use — piped
+ * straight into an extract. No name-list / gitignore-pattern guessing that could
+ * drop tracked source (e.g. a Next.js `app/.../build` route).
  */
-async function loadIgnoreMatcher(rootPath: string): Promise<IgnoreMatcher | undefined> {
-  const matcher = ignore();
-  let found = false;
-  for (const name of [".gitignore", ".dockerignore"]) {
-    try {
-      matcher.add(await readFile(join(rootPath, name), "utf-8"));
-      found = true;
-    } catch {
-      /* file absent — skip */
-    }
+async function materializeLocalSource(sourcePath: string, targetPath: string): Promise<void> {
+  const { args, cleanup } = await prepareSourceTarArgs(sourcePath);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const create = spawn("tar", args, { env: getTarCreateEnv() });
+      const extract = spawn("tar", ["-xzf", "-", "-C", targetPath]);
+      let err = "";
+      create.stderr.on("data", (d) => (err += d.toString()));
+      extract.stderr.on("data", (d) => (err += d.toString()));
+      create.on("error", reject);
+      extract.on("error", reject);
+      create.stdout.pipe(extract.stdin);
+      extract.on("close", (code) =>
+        code === 0
+          ? resolve()
+          : reject(new Error(`context materialize failed (tar ${code}): ${err.trim().slice(-500)}`)),
+      );
+    });
+  } finally {
+    await cleanup();
   }
-  return found ? matcher : undefined;
-}
-
-async function pruneContextDirectory(
-  rootPath: string,
-  currentPath: string,
-  excludes: Set<string>,
-  ignoreMatcher?: IgnoreMatcher,
-): Promise<void> {
-  const entries = await readdir(currentPath, { withFileTypes: true });
-
-  await Promise.all(
-    entries.map(async (entry) => {
-      const absolutePath = join(currentPath, entry.name);
-      const relativePath = relative(rootPath, absolutePath);
-
-      if (isExcludedEntry(entry.name, currentPath, relativePath, excludes, ignoreMatcher)) {
-        await rm(absolutePath, { recursive: true, force: true });
-        return;
-      }
-
-      if (entry.isDirectory()) {
-        await pruneContextDirectory(rootPath, absolutePath, excludes, ignoreMatcher);
-      }
-    }),
-  );
 }
 
 async function resolveDockerfileName(
@@ -218,26 +200,6 @@ async function resolveDockerfileName(
   }
 
   return null;
-}
-
-async function copyLocalSource(
-  sourcePath: string,
-  targetPath: string,
-  excludes: Set<string>,
-  ignoreMatcher?: IgnoreMatcher,
-): Promise<void> {
-  await cp(sourcePath, targetPath, {
-    recursive: true,
-    filter: (candidate) => {
-      const rel = relative(sourcePath, candidate);
-      if (!rel || rel === ".") {
-        return true;
-      }
-
-      return !isExcludedEntry(basename(candidate), dirname(candidate), rel, excludes, ignoreMatcher);
-    },
-    force: true,
-  });
 }
 
 async function cloneGitSource(
@@ -308,28 +270,33 @@ export interface ResolvedDockerfile {
 }
 
 /**
- * Clone (git) or copy (local) the source into a fresh temp dir and prune it to
- * the Docker build context — ONCE. No Dockerfile resolution happens here: that
- * is per-image (see resolveServiceDockerfile) so N services share this tree.
+ * Materialize the source into a fresh temp dir as the Docker build context —
+ * ONCE. The tree is EXACTLY git's tracked set (local: `git ls-files`; clone: a
+ * clean checkout, tracked by construction), then a `.dockerignore` refinement.
+ * No name-list / gitignore-pattern pruning — git already knows source-vs-
+ * generated, so a tracked `build/`/`dist/` route is never dropped. No Dockerfile
+ * resolution here: that is per-image (see resolveServiceDockerfile).
  */
 export async function prepareSourceTree(
   config: BuildConfig,
   opts?: { onLog?: LogCallback },
 ): Promise<SourceTree> {
   const contextDir = await mkdtemp(join(tmpdir(), "openship-docker-context-"));
-  const excludes = getDockerContextExcludes(config);
 
   try {
     if (config.localPath) {
-      const ignoreMatcher = await loadIgnoreMatcher(config.localPath);
-      await copyLocalSource(config.localPath, contextDir, excludes, ignoreMatcher);
+      await materializeLocalSource(config.localPath, contextDir);
     } else {
-      // Pass the log callback so the clone's stderr/progress lines land
-      // in the build-log stream instead of being silently buffered.
+      // Pass the log callback so the clone's stderr/progress lines land in the
+      // build-log stream. A fresh clone already contains only tracked files, so
+      // there's nothing to prune (pruning by name/gitignore would delete tracked
+      // source — the exact bug this rewrite removes).
       await cloneGitSource(config, contextDir, opts?.onLog);
-      const ignoreMatcher = await loadIgnoreMatcher(contextDir);
-      await pruneContextDirectory(contextDir, contextDir, excludes, ignoreMatcher);
     }
+
+    // Docker-only refinement: dockerode tars the context as-is, so honor
+    // .dockerignore here. No-op when the repo has none.
+    await applyDockerignore(contextDir);
 
     return {
       contextDir,
