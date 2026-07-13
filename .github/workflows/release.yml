@@ -126,14 +126,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            label: macOS arm64
-            find: "-name *.dmg"
-            asset: Openship-arm64.dmg
-          - os: macos-13
-            label: macOS x64
-            find: "-name *.dmg"
-            asset: Openship-x64.dmg
           - os: windows-latest
             label: Windows x64
             find: "-name *.zip"
@@ -216,9 +208,82 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-desktop-macos:
+    name: Build desktop installers (macOS arm64 + x64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read bun version
+        id: bun-version
+        shell: bash
+        run: echo "version=$(cat .bun-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun-version.outputs.version }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore bun cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # A single Apple-Silicon runner builds both dmgs: bun --compile --target
+      # cross-compiles the x64 API binary and electron-packager fetches x64
+      # Electron, so we don't depend on scarce macos-13 (Intel) runners.
+      - name: Build macOS dmgs (arm64 + x64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd apps/desktop
+          bun run build
+          bunx electron-forge make --arch=arm64
+          bunx electron-forge make --arch=x64
+
+      - name: Collect dmgs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for arch in arm64 x64; do
+            src="apps/desktop/out/make/Openship-${arch}.dmg"
+            if [[ ! -f "${src}" ]]; then
+              echo "Missing ${src}"; ls -R apps/desktop/out/make || true; exit 1
+            fi
+            cp "${src}" "dist/Openship-${arch}.dmg"
+            ( cd dist && shasum -a 256 "Openship-${arch}.dmg" > "Openship-${arch}.dmg.sha256" )
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-macos
+          path: |
+            dist/Openship-arm64.dmg
+            dist/Openship-arm64.dmg.sha256
+            dist/Openship-x64.dmg
+            dist/Openship-x64.dmg.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish GitHub release
-    needs: [build-openship, build-email, build-desktop]
+    needs: [build-openship, build-email, build-desktop, build-desktop-macos]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout

@@ -58,10 +58,13 @@ module.exports = {
     // Build + stage the self-contained payload (API binary, dashboard
     // standalone, migrations, pglite assets) before packaging. Runs for both
     // `package` and `make`. Requires bun on PATH.
-    generateAssets: async (_forgeConfig, _platform, _arch) => {
+    generateAssets: async (_forgeConfig, _platform, arch) => {
+      // Forward the build arch so stage.ts compiles the API for the right
+      // target (enables cross-compiling x64 on an arm64 runner).
       execFileSync("bun", ["run", path.join(__dirname, "build/stage.ts")], {
         cwd: __dirname,
         stdio: "inherit",
+        env: { ...process.env, FORGE_ARCH: arch },
       });
     },
 
@@ -87,7 +90,9 @@ module.exports = {
     // release workflow's `find -name *.dmg` still picks it up.
     postMake: async (_forgeConfig, makeResults) => {
       if (process.platform !== "darwin") return makeResults;
-      const arch = process.arch; // each runner packages its own native arch
+      // Forge builds one arch per `make` invocation; take it from the results
+      // so a cross-built x64 make produces Openship-x64.dmg (not the host arch).
+      const arch = makeResults.find((r) => r.platform === "darwin")?.arch || process.arch;
       const appPath = path.join(__dirname, "out", `Openship-darwin-${arch}`, "Openship.app");
       if (!existsSync(appPath)) {
         throw new Error(`postMake: expected packaged app at ${appPath}`);
