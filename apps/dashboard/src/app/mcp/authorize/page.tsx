@@ -19,7 +19,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, Boxes, AlertCircle, Lock, Building2 } from "lucide-react";
+import { Loader2, Boxes, AlertCircle, Lock, Building2, ShieldCheck } from "lucide-react";
 import { authClient, useSession } from "@/lib/auth-client";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -158,7 +158,7 @@ function McpAuthorizeInner() {
         ? `Read-only access to everything in ${orgName}.`
         : `Full access to ${orgName} — deploy, create, and manage any resource.`
       : limitedButEmpty
-        ? "Pick at least one resource below, or switch to Full access."
+        ? "Pick at least one resource, or switch to Full access."
         : `Limited to ${grants.length} resource${grants.length === 1 ? "" : "s"} in ${orgName}${readOnly ? ", read-only" : ""}.`;
 
   const act = useCallback(
@@ -235,9 +235,9 @@ function McpAuthorizeInner() {
         </div>
       </div>
 
-      {/* Body — identity + org (left) · access level (right, wide). */}
-      <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
-        {/* LEFT — who + which org */}
+      {/* Body — every access choice on the left rail · resource detail on the right. */}
+      <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
+        {/* LEFT — identity, org, and the Full/Limited + read-only choices. */}
         <div className="space-y-4">
           <div className="rounded-xl border border-border/50 bg-muted/20 p-4 text-sm">
             <p className="text-muted-foreground">
@@ -249,8 +249,7 @@ function McpAuthorizeInner() {
             </p>
           </div>
 
-          {/* Organization — the client acts ONLY within this org. Switching it
-              changes your active workspace so the scope below matches. */}
+          {/* Switching org changes your active workspace so the scope matches. */}
           {orgs.length > 0 && (
             <div className="rounded-xl border border-border/50 p-4">
               <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
@@ -281,73 +280,54 @@ function McpAuthorizeInner() {
               )}
             </div>
           )}
-        </div>
 
-        {/* RIGHT — access level: explicit Full vs Limited so what's granted is
-            obvious, not implied by an empty picker. */}
-        <div className="space-y-4 rounded-xl border border-border/50 p-5">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">How much access to grant</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              You can only grant access you already hold yourself.
-            </p>
-          </div>
-
-          {/* Full vs Limited (radio cards) */}
-          <div className="space-y-2">
-            <AccessOption
-              active={mode === "full"}
-              disabled={busy}
-              onClick={() => setMode("full")}
-              title="Full access"
-              badge="Recommended"
-              desc={`Deploy, create, and manage everything in ${orgName} that you can. Best for your own client.`}
-            />
-            <AccessOption
-              active={mode === "limited"}
-              disabled={busy}
-              onClick={() => setMode("limited")}
-              title="Limited access"
-              desc="Restrict the client to only the specific resources you pick below."
-            />
-          </div>
-
-          {/* Read-only modifier — applies to whichever mode is selected. */}
-          <label className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-border/50 p-3">
-            <input
-              type="checkbox"
-              checked={readOnly}
-              onChange={(e) => setReadOnly(e.target.checked)}
-              disabled={busy}
-              className="mt-0.5 size-4 rounded border-border/60"
-            />
-            <span className="min-w-0">
-              <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                <Lock className="size-3.5 text-muted-foreground" />
-                Read-only
-              </span>
-              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                The client can view but not deploy, change, or delete.
-              </span>
-            </span>
-          </label>
-
-          {/* Limited → resource picker */}
-          {mode === "limited" && (
-            <div className="space-y-3 border-t border-border/40 pt-3">
-              <p className="text-xs text-muted-foreground">
-                Choose the resources this client may access:
+          {/* Access level: explicit Full vs Limited so what's granted is obvious. */}
+          <div className="space-y-3 rounded-xl border border-border/50 p-4">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">How much access to grant</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                You can only grant access you already hold yourself.
               </p>
-              <ResourcePicker
-                key={orgId ?? "none"}
-                value={grants}
-                onChange={setGrants}
-                availableTypes={grantableTypes(selfHosted)}
-                defaultPermissions={["read", "write"]}
+            </div>
+
+            <div className="space-y-2">
+              <AccessOption
+                active={mode === "full"}
                 disabled={busy}
+                onClick={() => setMode("full")}
+                title="Full access"
+                badge="Recommended"
+                desc={`Deploy, create, and manage everything in ${orgName} that you can. Best for your own client.`}
+              />
+              <AccessOption
+                active={mode === "limited"}
+                disabled={busy}
+                onClick={() => setMode("limited")}
+                title="Limited access"
+                desc="Restrict the client to only the specific resources you choose."
               />
             </div>
-          )}
+
+            {/* Read-only modifier — applies to whichever mode is selected. */}
+            <label className="flex cursor-pointer select-none items-start gap-3 rounded-xl border border-border/50 p-3">
+              <input
+                type="checkbox"
+                checked={readOnly}
+                onChange={(e) => setReadOnly(e.target.checked)}
+                disabled={busy}
+                className="mt-0.5 size-4 rounded border-border/60"
+              />
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                  <Lock className="size-3.5 text-muted-foreground" />
+                  Read-only
+                </span>
+                <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                  The client can view but not deploy, change, or delete.
+                </span>
+              </span>
+            </label>
+          </div>
 
           {/* Plain-language summary of exactly what this Authorize will grant. */}
           <div
@@ -359,6 +339,44 @@ function McpAuthorizeInner() {
           >
             {summary}
           </div>
+        </div>
+
+        {/* RIGHT — resource detail: the picker when Limited, a note when Full. */}
+        <div className="rounded-xl border border-border/50 p-5">
+          {mode === "limited" ? (
+            <div className="space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Resources this client can reach</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Choose the resources this client may access.
+                </p>
+              </div>
+              <ResourcePicker
+                key={orgId ?? "none"}
+                value={grants}
+                onChange={setGrants}
+                availableTypes={grantableTypes(selfHosted)}
+                defaultPermissions={["read", "write"]}
+                disabled={busy}
+              />
+            </div>
+          ) : (
+            <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 text-center">
+              <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                {readOnly ? <Lock className="size-5" /> : <ShieldCheck className="size-5" />}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {readOnly ? "Full read-only access" : "Full access"}
+                </p>
+                <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+                  {readOnly
+                    ? `This client can view everything in ${orgName} that you can, but can't make changes.`
+                    : `This client acts with your role in ${orgName} — no resource restrictions. Switch to Limited to scope it to specific resources.`}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
