@@ -692,8 +692,13 @@ async function resolveCloudPreflight(
 function checkConfig(snapshot: DeploymentConfigSnapshot, opts?: PreflightOptions): PreflightCheck {
   const missing: string[] = [];
 
-  if (!snapshot.repoUrl && !snapshot.localPath) missing.push("repository URL or local path");
-  if (!snapshot.branch && !snapshot.localPath) missing.push("branch");
+  // A folder-upload deploy has no git and no host path — its source is the
+  // pre-staged upload workspace (`sourceStaged`, set by requestBuildAccess).
+  // That's a valid source, so it satisfies both the source and branch checks.
+  if (!snapshot.repoUrl && !snapshot.localPath && !snapshot.sourceStaged) {
+    missing.push("repository URL or local path");
+  }
+  if (!snapshot.branch && !snapshot.localPath && !snapshot.sourceStaged) missing.push("branch");
 
   if (opts?.multiService) {
     if (missing.length > 0) {
