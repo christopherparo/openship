@@ -22,6 +22,20 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
+function isDarkTheme(): boolean {
+  if (typeof window === "undefined") return false;
+  const storedTheme = window.localStorage.getItem("theme");
+  if (storedTheme === "dark") return true;
+  if (storedTheme === "light") return false;
+  const bg = window.getComputedStyle(document.body).backgroundColor;
+  const match = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (match) {
+    const [, r, g, b] = match.map(Number);
+    return (r * 299 + g * 587 + b * 114) / 1000 < 128;
+  }
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
+
 /**
  * Shared OAuth buttons - GitHub + Google.
  * Includes the divider above them.
@@ -52,7 +66,23 @@ export function OAuthButtons({
   const { toast } = useToast();
   const { t } = useI18n();
   const [loading, setLoading] = useState<"github" | "google" | null>(null);
+  const [googleTheme, setGoogleTheme] = useState<"outline" | "filled_black">("outline");
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const updateTheme = () => setGoogleTheme(isDarkTheme() ? "filled_black" : "outline");
+    updateTheme();
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
+    window.addEventListener("storage", updateTheme);
+    const interval = window.setInterval(updateTheme, 500);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("storage", updateTheme);
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (!providers.google || !googleClientId || !googleButtonRef.current) return;
@@ -83,11 +113,11 @@ export function OAuthButtons({
       });
       googleButtonRef.current.innerHTML = "";
       window.google.accounts.id.renderButton(googleButtonRef.current, {
-        theme: "outline",
+        theme: googleTheme,
         size: "large",
         text: "continue_with",
         shape: "rectangular",
-        width: "360",
+        width: String(Math.min(400, googleButtonRef.current.clientWidth || 400)),
       });
     };
     if (window.google?.accounts?.id) {
@@ -103,7 +133,7 @@ export function OAuthButtons({
     script.onerror = () => toast("error", t.auth.errors.oauthFailed);
     if (!existing) document.head.appendChild(script);
     return () => { cancelled = true; };
-  }, [callbackURL, googleClientId, providers.google, t.auth.errors.oauthFailed, toast]);
+  }, [callbackURL, googleClientId, googleTheme, providers.google, t.auth.errors.oauthFailed, toast]);
 
   if (!providers.github && !providers.google) return null;
 
@@ -166,7 +196,10 @@ export function OAuthButtons({
         )}
 
         {providers.google && googleClientId ? (
-          <div className={loading === "google" ? "pointer-events-none opacity-70" : undefined} ref={googleButtonRef} />
+          <div
+            className={`flex w-full justify-center ${loading === "google" ? "pointer-events-none opacity-70" : ""}`}
+            ref={googleButtonRef}
+          />
         ) : providers.google ? (
           <Button
             variant="ghost"
