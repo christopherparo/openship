@@ -95,6 +95,17 @@ button {
   cursor: pointer;
 }
 
+/*
+ * Google Identity Services owns the sign-in button markup, but in its
+ * filled_black variant it paints a white square behind only the Google "G".
+ * On our dark auth surface that reads like a broken logo background. Keep the
+ * official GIS-rendered button while removing that icon-tile fill so the logo
+ * sits directly on the dark button like the rest of the control.
+ */
+[data-theme="dark"] .google-auth-button .nsm7Bb-HzV7m-LgbsSe-Bz112c-haAclf {
+  background-color: transparent !important;
+}
+
 /* Slide-in from the right, used by the cloud power picker when it
    appears next to the deploy-target column. Kept tiny on purpose —
    long animations on layout-changing elements feel laggy, not delightful. */

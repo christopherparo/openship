@@ -197,7 +197,7 @@ export function OAuthButtons({
 
         {providers.google && googleClientId ? (
           <div
-            className={`flex w-full justify-center ${loading === "google" ? "pointer-events-none opacity-70" : ""}`}
+            className={`google-auth-button flex w-full justify-center ${loading === "google" ? "pointer-events-none opacity-70" : ""}`}
             ref={googleButtonRef}
           />
         ) : providers.google ? (
