@@ -106,6 +106,8 @@ const envSchema = z.object({
   GITHUB_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  /** Comma-separated emails that should receive instance-admin role on provisioning. */
+  OPENSHIP_ADMIN_EMAILS: z.string().default(""),
 
   /* ---------- GitHub Auth Strategy ---------- */
   /**

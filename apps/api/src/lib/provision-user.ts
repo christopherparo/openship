@@ -31,8 +31,23 @@
 
 import { db, schema } from "@repo/db";
 import { generateId } from "@repo/core";
+import { env } from "../config/env";
 
 const { user, organization, member } = schema;
+
+function configuredAdminEmails(): Set<string> {
+  return new Set(
+    env.OPENSHIP_ADMIN_EMAILS
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function roleForEmail(email: string, explicitRole?: "admin" | "user"): "admin" | "user" {
+  if (configuredAdminEmails().has(email.trim().toLowerCase())) return "admin";
+  return explicitRole ?? "user";
+}
 
 export interface ProvisionUserInput {
   id: string;
@@ -60,6 +75,8 @@ export async function provisionUser(input: ProvisionUserInput): Promise<string> 
     .replace(/^-+|-+$/g, "");
   const slug = `ws-${slugSeed}-${input.id.slice(0, 8)}`;
 
+  const role = roleForEmail(input.email, input.role);
+
   await db.transaction(async (tx) => {
     await tx
       .insert(user)
@@ -68,11 +85,20 @@ export async function provisionUser(input: ProvisionUserInput): Promise<string> 
         name: displayName,
         email: input.email,
         emailVerified: input.emailVerified ?? false,
-        role: input.role ?? "user",
+        role,
         autoProvisioned: input.autoProvisioned ?? false,
         image: input.image ?? null,
       })
-      .onConflictDoNothing({ target: user.id });
+      .onConflictDoUpdate({
+        target: user.id,
+        set: {
+          name: displayName,
+          email: input.email,
+          emailVerified: input.emailVerified ?? false,
+          role,
+          image: input.image ?? null,
+        },
+      });
 
     await tx
       .insert(organization)
