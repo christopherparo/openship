@@ -28,6 +28,7 @@ import type { Context } from "hono";
 import { setSignedCookie } from "hono/cookie";
 import { auth, COOKIE_PREFIX } from "../../lib/auth";
 import { env, localDashboardUrl } from "../../config/env";
+import { safeErrorMessage } from "@repo/core";
 
 // ─── HTML result page ────────────────────────────────────────────────────────
 
@@ -71,6 +72,75 @@ async function setSessionCookie(
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
+
+interface GoogleTokenInfo {
+  aud?: string;
+  sub?: string;
+  email?: string;
+  email_verified?: string | boolean;
+  name?: string;
+  picture?: string;
+  error_description?: string;
+}
+
+/**
+ * POST /api/auth/google-id-token
+ *
+ * Google Identity Services flow for self-hosted installs that only have a
+ * browser OAuth client ID (no client secret). The frontend receives an ID token
+ * from google.accounts.id and the API verifies it against Google's tokeninfo
+ * endpoint, then mints the same Better Auth session cookie used everywhere else.
+ */
+export async function googleIdTokenLogin(c: Context) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return c.json({ error: "Google login is not configured" }, 400);
+  }
+
+  let credential = "";
+  try {
+    const body = await c.req.json<{ credential?: string }>();
+    credential = body.credential?.trim() ?? "";
+  } catch {
+    return c.json({ error: "Invalid request" }, 400);
+  }
+  if (!credential) return c.json({ error: "Missing credential" }, 400);
+
+  let info: GoogleTokenInfo;
+  try {
+    const url = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`;
+    const res = await fetch(url, { method: "GET" });
+    info = (await res.json()) as GoogleTokenInfo;
+    if (!res.ok) {
+      return c.json({ error: info.error_description || "Google token verification failed" }, 401);
+    }
+  } catch (err) {
+    console.warn(`[google-id-token] verification request failed: ${safeErrorMessage(err)}`);
+    return c.json({ error: "Google token verification failed" }, 401);
+  }
+
+  if (info.aud !== env.GOOGLE_CLIENT_ID || !info.sub || !info.email) {
+    return c.json({ error: "Google token verification failed" }, 401);
+  }
+
+  const { provisionUser } = await import("../../lib/provision-user");
+  const { mintSession } = await import("../../lib/cloud-auth-proxy");
+  const userId = `google_${info.sub}`;
+  await provisionUser({
+    id: userId,
+    name: info.name ?? info.email,
+    email: info.email,
+    emailVerified: info.email_verified === true || info.email_verified === "true",
+    image: info.picture ?? null,
+  });
+  const session = await mintSession({
+    purpose: "local-cookie",
+    userId,
+    ipAddress: c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    userAgent: c.req.header("user-agent") ?? null,
+  });
+  await setSessionCookie(c, session.token, session.expiresAt);
+  return c.json({ ok: true });
+}
 
 /**
  * GET /api/auth/get-session

@@ -97,6 +97,7 @@ export default async function AuthLayout({
       cloudAuthUrl={deploymentInfo.cloudAuthUrl}
       selfHosted={deploymentInfo.selfHosted}
       oauthProviders={deploymentInfo.oauthProviders}
+      googleClientId={deploymentInfo.googleClientId}
     >
       <div className="th-page">{children}</div>
     </AuthProviders>

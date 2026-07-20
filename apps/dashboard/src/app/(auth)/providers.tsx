@@ -11,6 +11,7 @@ interface AuthContextValue {
     github?: boolean;
     google?: boolean;
   };
+  googleClientId?: string;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -33,11 +34,12 @@ interface AuthProvidersProps {
     github?: boolean;
     google?: boolean;
   };
+  googleClientId?: string;
 }
 
-export function AuthProviders({ children, authMode, cloudAuthUrl, selfHosted, oauthProviders = {} }: AuthProvidersProps) {
+export function AuthProviders({ children, authMode, cloudAuthUrl, selfHosted, oauthProviders = {}, googleClientId }: AuthProvidersProps) {
   return (
-    <AuthContext.Provider value={{ authMode, cloudAuthUrl, selfHosted, oauthProviders }}>
+    <AuthContext.Provider value={{ authMode, cloudAuthUrl, selfHosted, oauthProviders, googleClientId }}>
       {children}
     </AuthContext.Provider>
   );

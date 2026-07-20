@@ -33,7 +33,7 @@ function RegisterPageInner() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const { t } = useI18n();
-  const { oauthProviders } = useAuthContext();
+  const { oauthProviders, googleClientId } = useAuthContext();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -148,7 +148,7 @@ function RegisterPageInner() {
         </Button>
       </form>
 
-      <OAuthButtons callbackURL={postLoginUrl ?? "/"} providers={oauthProviders} />
+      <OAuthButtons callbackURL={postLoginUrl ?? "/"} providers={oauthProviders} googleClientId={googleClientId} />
 
       <p className="mt-8 text-center text-sm text-muted-foreground">
         {t.auth.register.hasAccount}{" "}

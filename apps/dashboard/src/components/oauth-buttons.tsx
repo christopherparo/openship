@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { signIn } from "@/lib/auth-client";
 import { useToast } from "@/components/toast";
 import { useI18n } from "@/components/i18n-provider";
@@ -27,16 +27,83 @@ function isAbortError(err: unknown): boolean {
  * Includes the divider above them.
  * Pass callbackURL to override the default post-OAuth redirect.
  */
+declare global {
+  interface Window {
+    google?: {
+      accounts?: {
+        id?: {
+          initialize: (options: { client_id: string; callback: (response: { credential?: string }) => void }) => void;
+          renderButton: (parent: HTMLElement, options: Record<string, string>) => void;
+        };
+      };
+    };
+  }
+}
+
 export function OAuthButtons({
   callbackURL = "/",
   providers = { github: true, google: true },
+  googleClientId,
 }: {
   callbackURL?: string;
   providers?: { github?: boolean; google?: boolean };
+  googleClientId?: string;
 }) {
   const { toast } = useToast();
   const { t } = useI18n();
   const [loading, setLoading] = useState<"github" | "google" | null>(null);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!providers.google || !googleClientId || !googleButtonRef.current) return;
+    let cancelled = false;
+    const mount = () => {
+      if (cancelled || !googleButtonRef.current || !window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: async ({ credential }) => {
+          if (!credential) {
+            toast("error", t.auth.errors.oauthFailed);
+            return;
+          }
+          setLoading("google");
+          try {
+            const res = await fetch("/api/auth/google-id-token", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ credential }),
+            });
+            if (!res.ok) throw new Error("Google sign-in failed");
+            window.location.href = new URL(callbackURL, window.location.origin).toString();
+          } catch {
+            toast("error", t.auth.errors.oauthFailed);
+            setLoading(null);
+          }
+        },
+      });
+      googleButtonRef.current.innerHTML = "";
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        shape: "rectangular",
+        width: "360",
+      });
+    };
+    if (window.google?.accounts?.id) {
+      mount();
+      return () => { cancelled = true; };
+    }
+    const existing = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
+    const script = existing ?? document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = mount;
+    script.onerror = () => toast("error", t.auth.errors.oauthFailed);
+    if (!existing) document.head.appendChild(script);
+    return () => { cancelled = true; };
+  }, [callbackURL, googleClientId, providers.google, t.auth.errors.oauthFailed, toast]);
 
   if (!providers.github && !providers.google) return null;
 
@@ -98,7 +165,9 @@ export function OAuthButtons({
           </Button>
         )}
 
-        {providers.google && (
+        {providers.google && googleClientId ? (
+          <div className={loading === "google" ? "pointer-events-none opacity-70" : undefined} ref={googleButtonRef} />
+        ) : providers.google ? (
           <Button
             variant="ghost"
             disabled={loading !== null}
@@ -108,7 +177,7 @@ export function OAuthButtons({
             {loading === "google" ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
             {t.auth.oauth.google}
           </Button>
-        )}
+        ) : null}
       </div>
     </>
   );

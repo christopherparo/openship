@@ -105,6 +105,7 @@ export type DeploymentInfo = {
     github?: boolean;
     google?: boolean;
   };
+  googleClientId?: string;
 };
 
 let _deploymentInfo: DeploymentInfo | null = null;

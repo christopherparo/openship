@@ -19,6 +19,8 @@ import * as ctrl from "./auth.controller";
 
 export const authRoutes = new Hono();
 
+authRoutes.post("/google-id-token", ctrl.googleIdTokenLogin);
+
 if (env.DEPLOY_MODE === "desktop") {
   authRoutes.get("/get-session", ctrl.getSession);
   authRoutes.get("/desktop-login", ctrl.desktopLogin);

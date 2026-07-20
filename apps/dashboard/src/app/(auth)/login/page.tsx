@@ -40,7 +40,7 @@ function LoginPageInner() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const { t } = useI18n();
-  const { authMode, cloudAuthUrl, oauthProviders } = useAuthContext();
+  const { authMode, cloudAuthUrl, oauthProviders, googleClientId } = useAuthContext();
 
   const isDesktop = typeof window !== "undefined" && !!window.desktop?.isDesktop;
   const handleBack = isDesktop ? () => { void window.desktop?.reset?.(); } : undefined;
@@ -228,7 +228,7 @@ function LoginPageInner() {
         </Button>
       </form>
 
-      <OAuthButtons callbackURL={postLoginUrl ?? "/"} providers={oauthProviders} />
+      <OAuthButtons callbackURL={postLoginUrl ?? "/"} providers={oauthProviders} googleClientId={googleClientId} />
 
       <p className="mt-8 text-center text-sm text-muted-foreground">
         {t.auth.login.noAccount}{" "}
