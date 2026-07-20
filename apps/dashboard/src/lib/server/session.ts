@@ -101,6 +101,10 @@ export type DeploymentInfo = {
    * 503. Flips back to false once the cutover finishes.
    */
   migrationInProgress?: boolean;
+  oauthProviders?: {
+    github?: boolean;
+    google?: boolean;
+  };
 };
 
 let _deploymentInfo: DeploymentInfo | null = null;

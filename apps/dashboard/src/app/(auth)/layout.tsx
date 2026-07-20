@@ -92,7 +92,12 @@ export default async function AuthLayout({
   const deploymentInfo = await getDeploymentInfo();
 
   return (
-    <AuthProviders authMode={deploymentInfo.authMode} cloudAuthUrl={deploymentInfo.cloudAuthUrl} selfHosted={deploymentInfo.selfHosted}>
+    <AuthProviders
+      authMode={deploymentInfo.authMode}
+      cloudAuthUrl={deploymentInfo.cloudAuthUrl}
+      selfHosted={deploymentInfo.selfHosted}
+      oauthProviders={deploymentInfo.oauthProviders}
+    >
       <div className="th-page">{children}</div>
     </AuthProviders>
   );

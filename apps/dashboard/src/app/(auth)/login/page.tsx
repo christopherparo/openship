@@ -40,7 +40,7 @@ function LoginPageInner() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const { t } = useI18n();
-  const { authMode, cloudAuthUrl, selfHosted } = useAuthContext();
+  const { authMode, cloudAuthUrl, oauthProviders } = useAuthContext();
 
   const isDesktop = typeof window !== "undefined" && !!window.desktop?.isDesktop;
   const handleBack = isDesktop ? () => { void window.desktop?.reset?.(); } : undefined;
@@ -228,8 +228,7 @@ function LoginPageInner() {
         </Button>
       </form>
 
-      {/* OAuth only for SaaS (cloud-hosted) - hidden on self-hosted */}
-      {!selfHosted && <OAuthButtons callbackURL={postLoginUrl ?? "/"} />}
+      <OAuthButtons callbackURL={postLoginUrl ?? "/"} providers={oauthProviders} />
 
       <p className="mt-8 text-center text-sm text-muted-foreground">
         {t.auth.login.noAccount}{" "}

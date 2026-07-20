@@ -98,6 +98,10 @@ healthRoutes.get("/env", async (c) => {
     teamMode,
     migrationTargetUrl,
     migrationInProgress,
+    oauthProviders: {
+      github: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
+      google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+    },
     // Both respect OPENSHIP_CLOUD_TARGET (cloudRuntimeTarget). The dashboard
     // must use these, not its static table, to reach the right cloud.
     cloudAuthUrl: cloudRuntimeTarget.dashboard,

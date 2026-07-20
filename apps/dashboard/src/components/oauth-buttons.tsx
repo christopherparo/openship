@@ -27,10 +27,18 @@ function isAbortError(err: unknown): boolean {
  * Includes the divider above them.
  * Pass callbackURL to override the default post-OAuth redirect.
  */
-export function OAuthButtons({ callbackURL = "/" }: { callbackURL?: string }) {
+export function OAuthButtons({
+  callbackURL = "/",
+  providers = { github: true, google: true },
+}: {
+  callbackURL?: string;
+  providers?: { github?: boolean; google?: boolean };
+}) {
   const { toast } = useToast();
   const { t } = useI18n();
   const [loading, setLoading] = useState<"github" | "google" | null>(null);
+
+  if (!providers.github && !providers.google) return null;
 
   async function handleOAuth(provider: "github" | "google") {
     setLoading(provider);
@@ -78,25 +86,29 @@ export function OAuthButtons({ callbackURL = "/" }: { callbackURL?: string }) {
 
       {/* OAuth buttons */}
       <div className="space-y-2.5">
-        <Button
-          variant="ghost"
-          disabled={loading !== null}
-          onClick={() => handleOAuth("github")}
-          className="w-full border-0 bg-foreground/[0.04] hover:bg-foreground/[0.08]"
-        >
-          {loading === "github" ? <Loader2 className="animate-spin" /> : <Github />}
-          {t.auth.oauth.github}
-        </Button>
+        {providers.github && (
+          <Button
+            variant="ghost"
+            disabled={loading !== null}
+            onClick={() => handleOAuth("github")}
+            className="w-full border-0 bg-foreground/[0.04] hover:bg-foreground/[0.08]"
+          >
+            {loading === "github" ? <Loader2 className="animate-spin" /> : <Github />}
+            {t.auth.oauth.github}
+          </Button>
+        )}
 
-        <Button
-          variant="ghost"
-          disabled={loading !== null}
-          onClick={() => handleOAuth("google")}
-          className="w-full border-0 bg-foreground/[0.04] hover:bg-foreground/[0.08]"
-        >
-          {loading === "google" ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
-          {t.auth.oauth.google}
-        </Button>
+        {providers.google && (
+          <Button
+            variant="ghost"
+            disabled={loading !== null}
+            onClick={() => handleOAuth("google")}
+            className="w-full border-0 bg-foreground/[0.04] hover:bg-foreground/[0.08]"
+          >
+            {loading === "google" ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+            {t.auth.oauth.google}
+          </Button>
+        )}
       </div>
     </>
   );
