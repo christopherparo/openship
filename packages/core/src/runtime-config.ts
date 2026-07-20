@@ -57,6 +57,13 @@ export const DASHBOARD_RUNTIME_TARGETS = {
     cloudTargetId: "cloud-saas",
     selfHosted: false,
   },
+  paro: {
+    dashboard: "https://cloud.paro.sh",
+    api: "https://cloud.paro.sh",
+    ports: { dashboard: DEFAULT_PORT.dashboard, api: DEFAULT_PORT.api },
+    cloudTargetId: "cloud-saas",
+    selfHosted: true,
+  },
 } as const;
 
 // NOTE: this table is the source of truth for WHO an instance is (identity,
